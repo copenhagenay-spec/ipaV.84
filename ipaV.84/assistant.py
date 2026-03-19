@@ -494,7 +494,7 @@ def main() -> None:
         def _download_model(lang: str, url: str):
             dest_root = os.path.join(os.path.dirname(__file__), "data", "model")
             os.makedirs(dest_root, exist_ok=True)
-            zip_path = os.path.join(dest_root, f\"{lang}.zip\")
+            zip_path = os.path.join(dest_root, f"{lang}.zip")
             extract_dir = os.path.join(dest_root, lang)
             os.makedirs(extract_dir, exist_ok=True)
 
@@ -506,7 +506,7 @@ def main() -> None:
                     urllib.request.urlretrieve(url, zip_path)
                     with zipfile.ZipFile(zip_path, "r") as zf:
                         zf.extractall(extract_dir)
-                    messagebox.showinfo("Done", f\"{lang.upper()} model downloaded.\")
+                    messagebox.showinfo("Done", f"{lang.upper()} model downloaded.")
                 except Exception as exc:
                     messagebox.showerror("Download Error", str(exc))
 
