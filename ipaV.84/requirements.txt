@@ -1,0 +1,8 @@
+# IPA requirements
+# Install Python 3.10+ first: https://www.python.org/downloads/
+
+sounddevice
+vosk
+pynput
+pystray
+pillow
