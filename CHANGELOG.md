@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.84.5
+- Added mishear corrections for common speech recognition variants (e.g. "your job" → "youtube").
+
 ## 0.84.4
 - Added `setup.cmd` for installing dependencies without needing the UI (fixes fresh install bootstrapping).
 - Updated README with clearer install steps including standalone Python and PATH instructions.

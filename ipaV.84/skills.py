@@ -332,6 +332,30 @@ def _youtube_search(query: str) -> bool:
         return False
 
 
+_MISHEAR_MAP = {
+    "your job": "youtube",
+    "you tube": "youtube",
+    "you to": "youtube",
+    "you too": "youtube",
+    "utube": "youtube",
+    "u tube": "youtube",
+    "your tube": "youtube",
+    "your job": "youtube",
+    "spotty": "spotify",
+    "spot if i": "spotify",
+    "spot ify": "spotify",
+    "any may": "anime",
+    "any me": "anime",
+    "anymay": "anime",
+}
+
+def _apply_mishear_corrections(text: str) -> str:
+    t = text.lower()
+    for mishear, correction in _MISHEAR_MAP.items():
+        t = t.replace(mishear, correction)
+    return t
+
+
 def _normalize_text(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.lower())
 
@@ -523,7 +547,7 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None) -> 
     Try to match transcript to skills.
     Returns True if a skill handled it.
     """
-    t = text.strip().lower()
+    t = _apply_mishear_corrections(text.strip().lower())
     if not t:
         return False
 
