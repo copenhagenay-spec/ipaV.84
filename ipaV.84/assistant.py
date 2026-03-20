@@ -13,7 +13,9 @@ import shutil
 import tempfile
 import urllib.request
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox
+
+import customtkinter as ctk
 
 from app import MissingDependencyError, transcribe_mic, transcribe_mic_hold
 from config import load_config, save_config
@@ -149,10 +151,18 @@ def main() -> None:
     except Exception:
         pass
 
-    root = tk.Tk()
+    # --- CustomTkinter setup ---
+    theme_path = os.path.join(os.path.dirname(__file__), "data", "assets", "ipa_theme.json")
+    if os.path.exists(theme_path):
+        ctk.set_default_color_theme(theme_path)
+
+    is_dark = cfg.get("theme", "dark") == "dark"
+    ctk.set_appearance_mode("dark" if is_dark else "light")
+
+    root = ctk.CTk()
     root.title("IPA Assistant")
-    root.geometry("560x520")
-    root.minsize(560, 420)
+    root.geometry("620x560")
+    root.minsize(580, 460)
     root.resizable(True, True)
     try:
         icon_path = os.path.join(os.path.dirname(__file__), "data", "assets", "ipa.ico")
@@ -161,58 +171,8 @@ def main() -> None:
     except Exception:
         pass
 
-    theme_var = tk.BooleanVar(value=(cfg.get("theme", "dark") == "dark"))
-
-    def _apply_theme(is_dark: bool) -> None:
-        if is_dark:
-            bg = "#1e1f22"
-            fg = "#e6e6e6"
-            entry_bg = "#2b2d31"
-            accent = "#22c55e"
-            select_fg = "#0b0b0b"
-        else:
-            bg = "#f6f6f6"
-            fg = "#111111"
-            entry_bg = "#ffffff"
-            accent = "#0ea5e9"
-            select_fg = "#ffffff"
-
-        root.configure(bg=bg)
-        root.option_add("*Background", bg)
-        root.option_add("*Foreground", fg)
-        root.option_add("*EntryBackground", entry_bg)
-        root.option_add("*ListboxBackground", entry_bg)
-        root.option_add("*ListboxForeground", fg)
-        root.option_add("*insertBackground", fg)
-        root.option_add("*selectBackground", accent)
-        root.option_add("*selectForeground", select_fg)
-
-        style = ttk.Style(root)
-        style.theme_use("clam")
-        style.configure("TFrame", background=bg)
-        style.configure("TLabel", background=bg, foreground=fg)
-        style.configure("TButton", background=entry_bg, foreground=fg)
-        style.configure("TCheckbutton", background=bg, foreground=fg)
-        style.configure("TRadiobutton", background=bg, foreground=fg)
-        style.configure("TNotebook", background=bg)
-        style.configure("TNotebook.Tab", background=entry_bg, foreground=fg)
-        style.map(
-            "TNotebook.Tab",
-            background=[("selected", bg)],
-            foreground=[("selected", fg)],
-        )
-
-    _apply_theme(theme_var.get())
-
-    notebook = ttk.Notebook(root)
-    main_tab = ttk.Frame(notebook)
-    apps_tab = ttk.Frame(notebook)
-    actions_tab = ttk.Frame(notebook)
-    notebook.add(main_tab, text="Main")
-    notebook.add(apps_tab, text="Apps")
-    notebook.add(actions_tab, text="Actions")
-    notebook.pack(fill="both", expand=True)
-
+    # --- Tk variables (these still use tkinter StringVar/BooleanVar) ---
+    theme_var = tk.BooleanVar(value=is_dark)
     mode = tk.StringVar(value=cfg.get("mode", "mic"))
     language = tk.StringVar(value=cfg.get("language", "English"))
     seconds = tk.StringVar(value=str(cfg.get("seconds", 5)))
@@ -252,6 +212,8 @@ def main() -> None:
     listener = BackgroundListener()
     tray_icon = {"icon": None}
     tray_ready = {"ok": False}
+
+    # --- Helper functions (logic unchanged) ---
 
     def _model_dir() -> str:
         lang = language.get().lower()
@@ -592,9 +554,11 @@ def main() -> None:
     def _load_logo():
         logo_path = os.path.join(os.path.dirname(__file__), "data", "assets", "ipa_logo.png")
         try:
-            img = tk.PhotoImage(file=logo_path)
-            # Scale down for UI (keep it compact)
-            img = img.subsample(6, 6)
+            from PIL import Image  # type: ignore
+            pil_img = Image.open(logo_path)
+            w, h = pil_img.size
+            new_w, new_h = w // 6, h // 6
+            img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(new_w, new_h))
             return img
         except Exception:
             return None
@@ -604,12 +568,15 @@ def main() -> None:
         save_config(data)
         messagebox.showinfo("Saved", "Configuration saved.")
 
+    # --- Actions list helpers ---
     def _refresh_actions():
-        actions_list.delete(0, tk.END)
+        actions_textbox.configure(state="normal")
+        actions_textbox.delete("1.0", "end")
         for a in actions:
             phrase = a.get("phrase", "")
             command = a.get("command", "")
-            actions_list.insert(tk.END, f"{phrase} -> {command}")
+            actions_textbox.insert("end", f"{phrase}  ->  {command}\n")
+        actions_textbox.configure(state="disabled")
 
     def _add_action():
         phrase = phrase_var.get().strip()
@@ -623,24 +590,27 @@ def main() -> None:
         _refresh_actions()
 
     def _remove_action():
-        sel = actions_list.curselection()
-        if not sel:
+        if not actions:
             return
-        idx = sel[0]
-        actions.pop(idx)
+        actions.pop(-1)
         _refresh_actions()
 
+    # --- Apps list helpers ---
     def _refresh_apps():
-        apps_list.delete(0, tk.END)
+        apps_textbox.configure(state="normal")
+        apps_textbox.delete("1.0", "end")
         for a in apps:
             name = a.get("name", "")
             command = a.get("command", "")
-            apps_list.insert(tk.END, f"{name} -> {command}")
+            apps_textbox.insert("end", f"{name}  ->  {command}\n")
+        apps_textbox.configure(state="disabled")
 
     def _refresh_aliases():
-        aliases_list.delete(0, tk.END)
+        aliases_textbox.configure(state="normal")
+        aliases_textbox.delete("1.0", "end")
         for a in aliases:
-            aliases_list.insert(tk.END, f"{a.get('alias')} -> {a.get('target')}")
+            aliases_textbox.insert("end", f"{a.get('alias')}  ->  {a.get('target')}\n")
+        aliases_textbox.configure(state="disabled")
 
     def _add_alias():
         alias = alias_var.get().strip().lower()
@@ -654,11 +624,9 @@ def main() -> None:
         _refresh_aliases()
 
     def _remove_alias():
-        sel = aliases_list.curselection()
-        if not sel:
+        if not aliases:
             return
-        idx = sel[0]
-        aliases.pop(idx)
+        aliases.pop(-1)
         _refresh_aliases()
 
     def _add_app():
@@ -683,11 +651,9 @@ def main() -> None:
             messagebox.showerror("Test Failed", str(exc))
 
     def _remove_app():
-        sel = apps_list.curselection()
-        if not sel:
+        if not apps:
             return
-        idx = sel[0]
-        apps.pop(idx)
+        apps.pop(-1)
         _refresh_apps()
 
     def _import_steam():
@@ -763,79 +729,83 @@ def main() -> None:
         listener.stop()
         status_var.set("Idle")
 
+    # --- Setup Wizard ---
     def _run_wizard():
-        wizard = tk.Toplevel(root)
+        wizard = ctk.CTkToplevel(root)
         wizard.title("IPA Setup Wizard")
-        wizard.geometry("520x420")
+        wizard.geometry("520x480")
         wizard.resizable(False, False)
         wizard.transient(root)
         wizard.grab_set()
         try:
             icon_path = os.path.join(os.path.dirname(__file__), "data", "assets", "ipa.ico")
             if os.path.exists(icon_path):
-                wizard.iconbitmap(icon_path)
+                wizard.after(200, lambda: wizard.iconbitmap(icon_path))
         except Exception:
             pass
 
-        wizard_canvas = tk.Canvas(wizard, borderwidth=0, highlightthickness=0)
-        wizard_scroll = tk.Scrollbar(wizard, orient="vertical", command=wizard_canvas.yview)
-        wizard_canvas.configure(yscrollcommand=wizard_scroll.set)
-        wizard_scroll.pack(side="right", fill="y")
-        wizard_canvas.pack(side="left", fill="both", expand=True)
+        scroll = ctk.CTkScrollableFrame(wizard)
+        scroll.pack(fill="both", expand=True, padx=10, pady=10)
 
-        wizard_content = tk.Frame(wizard_canvas)
-        wizard_window = wizard_canvas.create_window((0, 0), window=wizard_content, anchor="nw")
-
-        def _on_wizard_configure(_event):
-            wizard_canvas.configure(scrollregion=wizard_canvas.bbox("all"))
-
-        def _on_wizard_canvas_configure(event):
-            wizard_canvas.itemconfigure(wizard_window, width=event.width)
-
-        wizard_content.bind("<Configure>", _on_wizard_configure)
-        wizard_canvas.bind("<Configure>", _on_wizard_canvas_configure)
-
-        def _on_wizard_mousewheel(event):
-            wizard_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-        wizard_canvas.bind_all("<MouseWheel>", _on_wizard_mousewheel)
-
-        w_pad = {"padx": 10, "pady": 6, "sticky": "w"}
+        ctk.CTkLabel(scroll, text="Welcome to IPA!", font=("Segoe UI", 18, "bold")).pack(
+            anchor="w", padx=10, pady=(10, 4)
+        )
 
         status_text = "Found" if _model_present() else "Not found"
-        tk.Label(wizard_content, text="Welcome to IPA!").grid(row=0, column=0, columnspan=2, **w_pad)
-        tk.Label(wizard_content, text=f"Model status: {status_text}").grid(row=1, column=0, columnspan=2, **w_pad)
-
-        tk.Label(wizard_content, text="Language").grid(row=2, column=0, **w_pad)
-        tk.OptionMenu(wizard_content, language, *LANG_CHOICES).grid(row=2, column=1, **w_pad)
-
-        tk.Label(wizard_content, text="Mode").grid(row=3, column=0, **w_pad)
-        tk.Radiobutton(wizard_content, text="Timed mic", variable=mode, value="mic").grid(row=3, column=1, **w_pad)
-        tk.Radiobutton(wizard_content, text="Hold-to-talk", variable=mode, value="hold").grid(row=4, column=1, **w_pad)
-        tk.Radiobutton(wizard_content, text="Hotkey", variable=mode, value="hotkey").grid(row=5, column=1, **w_pad)
-
-        tk.Label(wizard_content, text="Seconds (timed/hotkey)").grid(row=6, column=0, **w_pad)
-        tk.Entry(wizard_content, textvariable=seconds, width=10).grid(row=6, column=1, **w_pad)
-
-        tk.Label(wizard_content, text="Hotkey").grid(row=7, column=0, **w_pad)
-        tk.Entry(wizard_content, textvariable=hotkey, width=18).grid(row=7, column=1, **w_pad)
-        tk.Button(wizard_content, text="Record", command=lambda: _record_hotkey(hotkey)).grid(
-            row=7, column=2, padx=10, pady=6, sticky="w"
+        ctk.CTkLabel(scroll, text=f"Voice model status: {status_text}").pack(
+            anchor="w", padx=10, pady=(0, 10)
         )
 
-        tk.Label(wizard_content, text="Hold key").grid(row=8, column=0, **w_pad)
-        tk.Entry(wizard_content, textvariable=holdkey, width=18).grid(row=8, column=1, **w_pad)
-        tk.Button(wizard_content, text="Record", command=lambda: _record_hold_key(holdkey)).grid(
-            row=8, column=2, padx=10, pady=6, sticky="w"
+        # Language
+        lang_frame = ctk.CTkFrame(scroll)
+        lang_frame.pack(fill="x", padx=10, pady=6)
+        ctk.CTkLabel(lang_frame, text="Language").pack(side="left", padx=10, pady=8)
+        ctk.CTkOptionMenu(lang_frame, variable=language, values=LANG_CHOICES, width=160).pack(
+            side="right", padx=10, pady=8
         )
 
-        tk.Checkbutton(wizard_content, text="Enable Spotify media controls", variable=spotify_media).grid(
-            row=9, column=0, columnspan=2, padx=10, pady=2, sticky="w"
+        # Mode
+        ctk.CTkLabel(scroll, text="Listening Mode", font=("Segoe UI", 12, "bold")).pack(
+            anchor="w", padx=10, pady=(10, 4)
         )
-        tk.Checkbutton(wizard_content, text="Require word 'spotify' in command", variable=spotify_requires).grid(
-            row=10, column=0, columnspan=2, padx=10, pady=2, sticky="w"
+        mode_frame = ctk.CTkFrame(scroll)
+        mode_frame.pack(fill="x", padx=10, pady=6)
+        ctk.CTkRadioButton(mode_frame, text="Timed mic", variable=mode, value="mic").pack(
+            anchor="w", padx=20, pady=4
+        )
+        ctk.CTkRadioButton(mode_frame, text="Hold-to-talk", variable=mode, value="hold").pack(
+            anchor="w", padx=20, pady=4
+        )
+        ctk.CTkRadioButton(mode_frame, text="Hotkey", variable=mode, value="hotkey").pack(
+            anchor="w", padx=20, pady=(4, 8)
         )
 
+        # Recording settings
+        rec_frame = ctk.CTkFrame(scroll)
+        rec_frame.pack(fill="x", padx=10, pady=6)
+        ctk.CTkLabel(rec_frame, text="Seconds").pack(side="left", padx=10, pady=8)
+        ctk.CTkEntry(rec_frame, textvariable=seconds, width=80).pack(side="left", padx=10, pady=8)
+        ctk.CTkLabel(rec_frame, text="Hotkey").pack(side="left", padx=10, pady=8)
+        ctk.CTkOptionMenu(rec_frame, variable=hotkey, values=HOTKEY_CHOICES, width=160).pack(
+            side="left", padx=10, pady=8
+        )
+
+        hold_frame = ctk.CTkFrame(scroll)
+        hold_frame.pack(fill="x", padx=10, pady=6)
+        ctk.CTkLabel(hold_frame, text="Hold key").pack(side="left", padx=10, pady=8)
+        ctk.CTkOptionMenu(hold_frame, variable=holdkey, values=HOLD_CHOICES, width=160).pack(
+            side="left", padx=10, pady=8
+        )
+
+        # Spotify
+        ctk.CTkCheckBox(scroll, text="Enable Spotify media controls", variable=spotify_media).pack(
+            anchor="w", padx=20, pady=4
+        )
+        ctk.CTkCheckBox(scroll, text="Require word 'spotify' in command", variable=spotify_requires).pack(
+            anchor="w", padx=20, pady=4
+        )
+
+        # Download buttons
         def _download_model(lang: str, url: str):
             dest_root = os.path.join(os.path.dirname(__file__), "data", "model")
             os.makedirs(dest_root, exist_ok=True)
@@ -846,7 +816,6 @@ def main() -> None:
             def _run():
                 try:
                     import urllib.request
-                    import zipfile
 
                     urllib.request.urlretrieve(url, zip_path)
                     with zipfile.ZipFile(zip_path, "r") as zf:
@@ -857,22 +826,25 @@ def main() -> None:
 
             threading.Thread(target=_run, daemon=True).start()
 
-        tk.Button(wizard_content, text="Download English Model", command=lambda: _download_model(
+        btn_frame = ctk.CTkFrame(scroll)
+        btn_frame.pack(fill="x", padx=10, pady=10)
+        ctk.CTkButton(btn_frame, text="Download English Model", command=lambda: _download_model(
             "en",
-            "https://github.com/copenhagenay-spec/IPA-alpha/releases/download/dependency/vosk-model-small-en-us-0.15.zip",
-        )).grid(row=11, column=0, padx=10, pady=6, sticky="w")
-
-        tk.Button(wizard_content, text="Download Spanish Model", command=lambda: _download_model(
+            "https://github.com/copenhagenay-spec/ipaV.84/releases/download/dependency/vosk-model-small-en-us-0.15.zip",
+        )).pack(side="left", padx=6, pady=8)
+        ctk.CTkButton(btn_frame, text="Download Spanish Model", command=lambda: _download_model(
             "es",
-            "https://github.com/copenhagenay-spec/IPA-alpha/releases/download/dependency2/vosk-model-small-es-0.42.zip",
-        )).grid(row=11, column=1, padx=10, pady=6, sticky="w")
+            "https://github.com/copenhagenay-spec/ipaV.84/releases/download/dependency2/vosk-model-small-es-0.42.zip",
+        )).pack(side="left", padx=6, pady=8)
 
-        tk.Button(wizard_content, text="Import Steam Apps", command=_import_steam).grid(
-            row=12, column=0, padx=10, pady=6, sticky="w"
+        btn_frame2 = ctk.CTkFrame(scroll)
+        btn_frame2.pack(fill="x", padx=10, pady=6)
+        ctk.CTkButton(btn_frame2, text="Import Steam Apps", command=_import_steam).pack(
+            side="left", padx=6, pady=8
         )
 
         def _install_deps_wizard():
-            deps = ["sounddevice", "vosk", "pynput", "pystray", "pillow"]
+            deps = ["sounddevice", "vosk", "pynput", "pystray", "pillow", "customtkinter"]
 
             def _run():
                 try:
@@ -883,8 +855,8 @@ def main() -> None:
 
             threading.Thread(target=_run, daemon=True).start()
 
-        tk.Button(wizard_content, text="Install Dependencies", command=_install_deps_wizard).grid(
-            row=12, column=1, padx=10, pady=6, sticky="w"
+        ctk.CTkButton(btn_frame2, text="Install Dependencies", command=_install_deps_wizard).pack(
+            side="left", padx=6, pady=8
         )
 
         def _finish():
@@ -894,10 +866,10 @@ def main() -> None:
             _start_background()
             messagebox.showinfo("Done", "Setup complete. IPA is ready.")
 
-        tk.Button(wizard_content, text="Finish", command=_finish).grid(
-            row=13, column=0, padx=10, pady=10, sticky="w"
-        )
+        ctk.CTkButton(scroll, text="Finish Setup", command=_finish, height=40,
+                       font=("Segoe UI", 14, "bold")).pack(padx=10, pady=16, fill="x")
 
+    # --- System Tray ---
     def _create_tray_icon():
         try:
             import pystray  # type: ignore
@@ -962,7 +934,6 @@ def main() -> None:
         threading.Thread(target=icon.run, daemon=True).start()
 
     def _on_close():
-        # Minimize to tray instead of exiting.
         if tray_ready["ok"]:
             root.withdraw()
         else:
@@ -982,7 +953,7 @@ def main() -> None:
         root.after(400, _poll_minimize)
 
     def _install_deps():
-        deps = ["sounddevice", "vosk", "pynput", "pystray", "pillow"]
+        deps = ["sounddevice", "vosk", "pynput", "pystray", "pillow", "customtkinter"]
         status_var.set("Installing dependencies...")
 
         def _run():
@@ -1033,199 +1004,280 @@ def main() -> None:
         except Exception:
             pass
 
-    # Layout
-    pad = {"padx": 10, "pady": 6, "sticky": "w"}
+    # =========================================================================
+    #  LAYOUT — the modern CustomTkinter UI
+    # =========================================================================
 
-    # Main tab
-    main_canvas = tk.Canvas(main_tab, borderwidth=0, highlightthickness=0)
-    main_scroll = tk.Scrollbar(main_tab, orient="vertical", command=main_canvas.yview)
-    main_canvas.configure(yscrollcommand=main_scroll.set)
-    main_scroll.pack(side="right", fill="y")
-    main_canvas.pack(side="left", fill="both", expand=True)
+    # --- Tabview (replaces ttk.Notebook) ---
+    tabview = ctk.CTkTabview(root)
+    tabview.pack(fill="both", expand=True, padx=10, pady=(10, 0))
+    tabview.add("Main")
+    tabview.add("Apps")
+    tabview.add("Actions")
+    tabview.set("Main")
 
-    main_content = ttk.Frame(main_canvas)
-    main_window = main_canvas.create_window((0, 0), window=main_content, anchor="nw")
+    # ---- MAIN TAB ----
+    main_scroll = ctk.CTkScrollableFrame(tabview.tab("Main"))
+    main_scroll.pack(fill="both", expand=True)
 
-    def _on_main_configure(_event):
-        main_canvas.configure(scrollregion=main_canvas.bbox("all"))
-
-    def _on_main_canvas_configure(event):
-        main_canvas.itemconfigure(main_window, width=event.width)
-
-    main_content.bind("<Configure>", _on_main_configure)
-    main_canvas.bind("<Configure>", _on_main_canvas_configure)
-
-    def _on_main_mousewheel(event):
-        main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-    main_canvas.bind_all("<MouseWheel>", _on_main_mousewheel)
-    main_content.columnconfigure(1, weight=1)
-    main_content.columnconfigure(2, weight=0)
-
-    def _section_label(text, row):
-        tk.Label(main_content, text=text, font=("Segoe UI", 10, "bold")).grid(
-            row=row, column=0, columnspan=2, padx=10, pady=(10, 4), sticky="w"
-        )
-
+    # Logo
     logo_img = _load_logo()
     if logo_img is not None:
-        logo_label = tk.Label(main_content, image=logo_img)
-        logo_label.image = logo_img  # keep reference
-        logo_label.grid(row=0, column=2, rowspan=8, padx=10, pady=6, sticky="ne")
+        logo_label = ctk.CTkLabel(main_scroll, image=logo_img, text="")
+        logo_label.pack(pady=(6, 2))
 
-    row = 0
-    _section_label("Mode", row)
-    row += 1
-    tk.Radiobutton(main_content, text="Timed mic", variable=mode, value="mic").grid(row=row, column=0, **pad)
-    tk.Radiobutton(main_content, text="Hold-to-talk", variable=mode, value="hold").grid(row=row, column=1, **pad)
-    row += 1
-    tk.Radiobutton(main_content, text="Hotkey", variable=mode, value="hotkey").grid(row=row, column=0, **pad)
-    row += 1
-    ttk.Separator(main_content, orient="horizontal").grid(row=row, column=0, columnspan=2, sticky="ew", padx=10, pady=6)
+    # -- Mode section --
+    ctk.CTkLabel(main_scroll, text="Listening Mode", font=("Segoe UI", 13, "bold")).pack(
+        anchor="w", padx=12, pady=(10, 4)
+    )
+    mode_card = ctk.CTkFrame(main_scroll)
+    mode_card.pack(fill="x", padx=12, pady=4)
 
-    row += 1
-    _section_label("Recording", row)
-    row += 1
-    tk.Label(main_content, text="Seconds (timed/hotkey)").grid(row=row, column=0, **pad)
-    tk.Entry(main_content, textvariable=seconds, width=10).grid(row=row, column=1, **pad)
-    row += 1
-    tk.Label(main_content, text="Language").grid(row=row, column=0, **pad)
-    tk.OptionMenu(main_content, language, *LANG_CHOICES).grid(row=row, column=1, **pad)
-    row += 1
-    tk.Label(main_content, text="Hotkey").grid(row=row, column=0, **pad)
-    tk.Entry(main_content, textvariable=hotkey, width=18).grid(row=row, column=1, **pad)
-    tk.Button(main_content, text="Record", command=lambda: _record_hotkey(hotkey)).grid(
-        row=row, column=2, padx=10, pady=6, sticky="w"
+    mode_row = ctk.CTkFrame(mode_card, fg_color="transparent")
+    mode_row.pack(fill="x", padx=12, pady=8)
+    ctk.CTkRadioButton(mode_row, text="Timed mic", variable=mode, value="mic").pack(
+        side="left", padx=(0, 16)
     )
-    row += 1
-    tk.Label(main_content, text="Hold key").grid(row=row, column=0, **pad)
-    tk.Entry(main_content, textvariable=holdkey, width=18).grid(row=row, column=1, **pad)
-    tk.Button(main_content, text="Record", command=lambda: _record_hold_key(holdkey)).grid(
-        row=row, column=2, padx=10, pady=6, sticky="w"
+    ctk.CTkRadioButton(mode_row, text="Hold-to-talk", variable=mode, value="hold").pack(
+        side="left", padx=(0, 16)
     )
-    row += 1
-    tk.Label(main_content, text="Search Engine URL").grid(row=row, column=0, **pad)
-    tk.Entry(main_content, textvariable=search_engine, width=45).grid(row=row, column=1, **pad)
-    row += 1
-    ttk.Separator(main_content, orient="horizontal").grid(row=row, column=0, columnspan=2, sticky="ew", padx=10, pady=6)
+    ctk.CTkRadioButton(mode_row, text="Hotkey", variable=mode, value="hotkey").pack(
+        side="left"
+    )
 
-    row += 1
-    _section_label("Options", row)
-    row += 1
-    tk.Checkbutton(main_content, text="Confirm before running actions", variable=confirm_actions).grid(
-        row=row, column=0, columnspan=2, padx=10, pady=4, sticky="w"
+    # -- Recording section --
+    ctk.CTkLabel(main_scroll, text="Recording Settings", font=("Segoe UI", 13, "bold")).pack(
+        anchor="w", padx=12, pady=(14, 4)
     )
-    row += 1
-    tk.Checkbutton(main_content, text="Dark mode (restart to apply)", variable=theme_var).grid(
-        row=row, column=0, columnspan=2, padx=10, pady=4, sticky="w"
-    )
-    row += 1
-    tk.Checkbutton(main_content, text="Enable Spotify media controls", variable=spotify_media).grid(
-        row=row, column=0, columnspan=2, padx=10, pady=4, sticky="w"
-    )
-    row += 1
-    tk.Checkbutton(main_content, text="Require word 'spotify' in command", variable=spotify_requires).grid(
-        row=row, column=0, columnspan=2, padx=10, pady=4, sticky="w"
-    )
-    row += 1
-    tk.Label(main_content, text="Spotify keywords (comma-separated)").grid(row=row, column=0, **pad)
-    tk.Entry(main_content, textvariable=spotify_keywords, width=45).grid(row=row, column=1, **pad)
-    row += 1
-    ttk.Separator(main_content, orient="horizontal").grid(row=row, column=0, columnspan=2, sticky="ew", padx=10, pady=6)
+    rec_card = ctk.CTkFrame(main_scroll)
+    rec_card.pack(fill="x", padx=12, pady=4)
 
-    row += 1
-    _section_label("Controls", row)
-    row += 1
-    tk.Button(main_content, text="Save Config", command=_save).grid(row=row, column=0, padx=10, pady=6, sticky="w")
-    tk.Button(main_content, text="Run Now", command=_run_now).grid(row=row, column=1, padx=10, pady=6, sticky="w")
-    row += 1
-    tk.Button(main_content, text="Install Deps", command=_install_deps).grid(row=row, column=0, padx=10, pady=6, sticky="w")
-    tk.Button(main_content, text="Create Bug Report", command=_create_bug_report).grid(
-        row=row, column=1, padx=10, pady=6, sticky="w"
-    )
-    row += 1
-    tk.Button(main_content, text="Start Background", command=_start_background).grid(
-        row=row, column=0, padx=10, pady=6, sticky="w"
-    )
-    tk.Button(main_content, text="Stop Background", command=_stop_background).grid(
-        row=row, column=1, padx=10, pady=6, sticky="w"
-    )
-    row += 1
-    tk.Button(main_content, text="Check for Updates", command=_check_for_updates).grid(
-        row=row, column=0, padx=10, pady=6, sticky="w"
-    )
-    row += 1
-    ttk.Separator(main_content, orient="horizontal").grid(row=row, column=0, columnspan=2, sticky="ew", padx=10, pady=6)
+    rec_row1 = ctk.CTkFrame(rec_card, fg_color="transparent")
+    rec_row1.pack(fill="x", padx=12, pady=(8, 4))
+    ctk.CTkLabel(rec_row1, text="Seconds", width=120).pack(side="left")
+    ctk.CTkEntry(rec_row1, textvariable=seconds, width=80).pack(side="left", padx=(0, 20))
+    ctk.CTkLabel(rec_row1, text="Language", width=80).pack(side="left")
+    ctk.CTkOptionMenu(rec_row1, variable=language, values=LANG_CHOICES, width=140).pack(side="left")
 
-    row += 1
-    _section_label("Status", row)
-    row += 1
-    tk.Label(main_content, text="Listening").grid(row=row, column=0, **pad)
-    tk.Label(main_content, textvariable=status_var).grid(row=row, column=1, **pad)
-    row += 1
-    tk.Label(main_content, text="Last Transcript").grid(row=row, column=0, **pad)
-    tk.Entry(main_content, textvariable=transcript_var, width=45).grid(row=row, column=1, **pad)
-    row += 1
-    tk.Label(
-        main_content,
-        text="Tip: Start Background to enable hotkey/hold listening.",
-        wraplength=380,
-        justify="left",
-    ).grid(row=row, column=0, columnspan=2, padx=10, pady=8, sticky="w")
+    rec_row2 = ctk.CTkFrame(rec_card, fg_color="transparent")
+    rec_row2.pack(fill="x", padx=12, pady=4)
+    ctk.CTkLabel(rec_row2, text="Hotkey", width=120).pack(side="left")
+    ctk.CTkOptionMenu(rec_row2, variable=hotkey, values=HOTKEY_CHOICES, width=180).pack(
+        side="left", padx=(0, 20)
+    )
+
+    rec_row3 = ctk.CTkFrame(rec_card, fg_color="transparent")
+    rec_row3.pack(fill="x", padx=12, pady=(4, 8))
+    ctk.CTkLabel(rec_row3, text="Hold key", width=120).pack(side="left")
+    ctk.CTkOptionMenu(rec_row3, variable=holdkey, values=HOLD_CHOICES, width=180).pack(side="left")
+
+    rec_row4 = ctk.CTkFrame(rec_card, fg_color="transparent")
+    rec_row4.pack(fill="x", padx=12, pady=(4, 8))
+    ctk.CTkLabel(rec_row4, text="Search Engine", width=120).pack(side="left")
+    ctk.CTkEntry(rec_row4, textvariable=search_engine, width=340).pack(side="left")
+
+    # -- Options section --
+    ctk.CTkLabel(main_scroll, text="Options", font=("Segoe UI", 13, "bold")).pack(
+        anchor="w", padx=12, pady=(14, 4)
+    )
+    opt_card = ctk.CTkFrame(main_scroll)
+    opt_card.pack(fill="x", padx=12, pady=4)
+
+    ctk.CTkCheckBox(opt_card, text="Confirm before running actions", variable=confirm_actions).pack(
+        anchor="w", padx=16, pady=(10, 4)
+    )
+
+    def _toggle_theme():
+        new_mode = "dark" if theme_var.get() else "light"
+        ctk.set_appearance_mode(new_mode)
+
+    ctk.CTkCheckBox(opt_card, text="Dark mode", variable=theme_var, command=_toggle_theme).pack(
+        anchor="w", padx=16, pady=4
+    )
+    ctk.CTkCheckBox(opt_card, text="Enable Spotify media controls", variable=spotify_media).pack(
+        anchor="w", padx=16, pady=4
+    )
+    ctk.CTkCheckBox(opt_card, text="Require word 'spotify' in command", variable=spotify_requires).pack(
+        anchor="w", padx=16, pady=4
+    )
+
+    spot_row = ctk.CTkFrame(opt_card, fg_color="transparent")
+    spot_row.pack(fill="x", padx=16, pady=(4, 10))
+    ctk.CTkLabel(spot_row, text="Spotify keywords").pack(side="left")
+    ctk.CTkEntry(spot_row, textvariable=spotify_keywords, width=240).pack(side="left", padx=(10, 0))
+
+    # -- Controls section --
+    ctk.CTkLabel(main_scroll, text="Controls", font=("Segoe UI", 13, "bold")).pack(
+        anchor="w", padx=12, pady=(14, 4)
+    )
+    ctrl_card = ctk.CTkFrame(main_scroll)
+    ctrl_card.pack(fill="x", padx=12, pady=4)
+
+    ctrl_row1 = ctk.CTkFrame(ctrl_card, fg_color="transparent")
+    ctrl_row1.pack(fill="x", padx=12, pady=(8, 4))
+    ctk.CTkButton(ctrl_row1, text="Save Config", command=_save, width=130).pack(side="left", padx=4)
+    ctk.CTkButton(ctrl_row1, text="Run Now", command=_run_now, width=130).pack(side="left", padx=4)
+    ctk.CTkButton(ctrl_row1, text="Install Deps", command=_install_deps, width=130).pack(side="left", padx=4)
+
+    ctrl_row2 = ctk.CTkFrame(ctrl_card, fg_color="transparent")
+    ctrl_row2.pack(fill="x", padx=12, pady=(4, 8))
+    ctk.CTkButton(ctrl_row2, text="Start Background", command=_start_background, width=130).pack(
+        side="left", padx=4
+    )
+    ctk.CTkButton(ctrl_row2, text="Stop Background", command=_stop_background, width=130,
+                   fg_color=("#cc3333", "#cc3333"), hover_color=("#aa2222", "#aa2222")).pack(
+        side="left", padx=4
+    )
+    ctk.CTkButton(ctrl_row2, text="Bug Report", command=_create_bug_report, width=130,
+                   fg_color=("gray60", "gray30"), hover_color=("gray50", "gray40")).pack(
+        side="left", padx=4
+    )
+
+    # -- Status section (bottom bar) --
+    status_frame = ctk.CTkFrame(root)
+    status_frame.pack(fill="x", padx=10, pady=(4, 10))
+
+    status_left = ctk.CTkFrame(status_frame, fg_color="transparent")
+    status_left.pack(fill="x", padx=12, pady=8)
+    ctk.CTkLabel(status_left, text="Status:", font=("Segoe UI", 11, "bold")).pack(side="left")
+    ctk.CTkLabel(status_left, textvariable=status_var).pack(side="left", padx=(8, 20))
+    ctk.CTkLabel(status_left, text="Last:", font=("Segoe UI", 11, "bold")).pack(side="left")
+    ctk.CTkEntry(status_left, textvariable=transcript_var, width=260).pack(side="left", padx=(8, 0))
+
+    # ---- APPS TAB ----
+    apps_scroll = ctk.CTkScrollableFrame(tabview.tab("Apps"))
+    apps_scroll.pack(fill="both", expand=True)
+
+    ctk.CTkLabel(apps_scroll, text="Registered Apps", font=("Segoe UI", 13, "bold")).pack(
+        anchor="w", padx=12, pady=(10, 4)
+    )
+    ctk.CTkLabel(apps_scroll, text="Say \"open <app name>\" to launch an app.").pack(
+        anchor="w", padx=12, pady=(0, 6)
+    )
+
+    apps_textbox = ctk.CTkTextbox(apps_scroll, height=120)
+    apps_textbox.pack(fill="x", padx=12, pady=4)
 
     app_name_var = tk.StringVar()
     app_cmd_var = tk.StringVar()
 
-    # Apps tab
-    tk.Label(apps_tab, text="Apps (say: open <app>)").grid(row=0, column=0, **pad)
-    apps_list = tk.Listbox(apps_tab, width=60, height=6)
-    apps_list.grid(row=1, column=0, columnspan=3, padx=10, pady=6, sticky="w")
+    app_input_card = ctk.CTkFrame(apps_scroll)
+    app_input_card.pack(fill="x", padx=12, pady=6)
 
-    tk.Label(apps_tab, text="App name").grid(row=2, column=0, **pad)
-    tk.Entry(apps_tab, textvariable=app_name_var, width=30).grid(row=2, column=1, **pad)
-    tk.Button(apps_tab, text="Add App", command=_add_app).grid(row=2, column=2, padx=10, pady=6, sticky="w")
+    app_r1 = ctk.CTkFrame(app_input_card, fg_color="transparent")
+    app_r1.pack(fill="x", padx=12, pady=(8, 4))
+    ctk.CTkLabel(app_r1, text="App name", width=100).pack(side="left")
+    ctk.CTkEntry(app_r1, textvariable=app_name_var, width=240, placeholder_text="e.g. notepad").pack(
+        side="left", padx=(0, 10)
+    )
 
-    tk.Label(apps_tab, text="App command").grid(row=3, column=0, **pad)
-    tk.Entry(apps_tab, textvariable=app_cmd_var, width=30).grid(row=3, column=1, **pad)
-    tk.Button(apps_tab, text="Remove App", command=_remove_app).grid(row=3, column=2, padx=10, pady=6, sticky="w")
+    app_r2 = ctk.CTkFrame(app_input_card, fg_color="transparent")
+    app_r2.pack(fill="x", padx=12, pady=(4, 8))
+    ctk.CTkLabel(app_r2, text="App command", width=100).pack(side="left")
+    ctk.CTkEntry(app_r2, textvariable=app_cmd_var, width=240, placeholder_text="e.g. notepad.exe").pack(
+        side="left", padx=(0, 10)
+    )
 
-    tk.Button(apps_tab, text="Test App", command=_test_app).grid(row=4, column=0, padx=10, pady=6, sticky="w")
-    tk.Button(apps_tab, text="Import Steam", command=_import_steam).grid(row=4, column=1, padx=10, pady=6, sticky="w")
+    app_btn_row = ctk.CTkFrame(apps_scroll, fg_color="transparent")
+    app_btn_row.pack(fill="x", padx=12, pady=4)
+    ctk.CTkButton(app_btn_row, text="Add App", command=_add_app, width=110).pack(side="left", padx=4)
+    ctk.CTkButton(app_btn_row, text="Remove Last", command=_remove_app, width=110,
+                   fg_color=("#cc3333", "#cc3333"), hover_color=("#aa2222", "#aa2222")).pack(
+        side="left", padx=4
+    )
+    ctk.CTkButton(app_btn_row, text="Test App", command=_test_app, width=110,
+                   fg_color=("gray60", "gray30"), hover_color=("gray50", "gray40")).pack(
+        side="left", padx=4
+    )
+    ctk.CTkButton(app_btn_row, text="Import Steam", command=_import_steam, width=110,
+                   fg_color=("gray60", "gray30"), hover_color=("gray50", "gray40")).pack(
+        side="left", padx=4
+    )
 
-    tk.Label(apps_tab, text="App Aliases (say alias to open target)").grid(row=5, column=0, **pad)
-    aliases_list = tk.Listbox(apps_tab, width=60, height=4)
-    aliases_list.grid(row=6, column=0, columnspan=3, padx=10, pady=6, sticky="w")
+    # Aliases section
+    ctk.CTkLabel(apps_scroll, text="App Aliases", font=("Segoe UI", 13, "bold")).pack(
+        anchor="w", padx=12, pady=(16, 4)
+    )
+    ctk.CTkLabel(apps_scroll, text="Say the alias to launch the target app.").pack(
+        anchor="w", padx=12, pady=(0, 6)
+    )
+
+    aliases_textbox = ctk.CTkTextbox(apps_scroll, height=80)
+    aliases_textbox.pack(fill="x", padx=12, pady=4)
 
     alias_var = tk.StringVar()
     alias_target_var = tk.StringVar()
 
-    tk.Label(apps_tab, text="Alias").grid(row=7, column=0, **pad)
-    tk.Entry(apps_tab, textvariable=alias_var, width=30).grid(row=7, column=1, **pad)
-    tk.Button(apps_tab, text="Add Alias", command=_add_alias).grid(row=7, column=2, padx=10, pady=6, sticky="w")
+    alias_input_card = ctk.CTkFrame(apps_scroll)
+    alias_input_card.pack(fill="x", padx=12, pady=6)
 
-    tk.Label(apps_tab, text="Target app").grid(row=8, column=0, **pad)
-    tk.Entry(apps_tab, textvariable=alias_target_var, width=30).grid(row=8, column=1, **pad)
-    tk.Button(apps_tab, text="Remove Alias", command=_remove_alias).grid(row=8, column=2, padx=10, pady=6, sticky="w")
+    alias_r1 = ctk.CTkFrame(alias_input_card, fg_color="transparent")
+    alias_r1.pack(fill="x", padx=12, pady=(8, 4))
+    ctk.CTkLabel(alias_r1, text="Alias", width=100).pack(side="left")
+    ctk.CTkEntry(alias_r1, textvariable=alias_var, width=240, placeholder_text="e.g. browser").pack(
+        side="left", padx=(0, 10)
+    )
 
-    # Actions tab
-    tk.Label(actions_tab, text="Voice Actions").grid(row=0, column=0, **pad)
-    actions_list = tk.Listbox(actions_tab, width=60, height=8)
-    actions_list.grid(row=1, column=0, columnspan=2, padx=10, pady=6, sticky="w")
+    alias_r2 = ctk.CTkFrame(alias_input_card, fg_color="transparent")
+    alias_r2.pack(fill="x", padx=12, pady=(4, 8))
+    ctk.CTkLabel(alias_r2, text="Target app", width=100).pack(side="left")
+    ctk.CTkEntry(alias_r2, textvariable=alias_target_var, width=240, placeholder_text="e.g. chrome").pack(
+        side="left", padx=(0, 10)
+    )
+
+    alias_btn_row = ctk.CTkFrame(apps_scroll, fg_color="transparent")
+    alias_btn_row.pack(fill="x", padx=12, pady=4)
+    ctk.CTkButton(alias_btn_row, text="Add Alias", command=_add_alias, width=110).pack(side="left", padx=4)
+    ctk.CTkButton(alias_btn_row, text="Remove Last", command=_remove_alias, width=110,
+                   fg_color=("#cc3333", "#cc3333"), hover_color=("#aa2222", "#aa2222")).pack(
+        side="left", padx=4
+    )
+
+    # ---- ACTIONS TAB ----
+    actions_scroll = ctk.CTkScrollableFrame(tabview.tab("Actions"))
+    actions_scroll.pack(fill="both", expand=True)
+
+    ctk.CTkLabel(actions_scroll, text="Voice Actions", font=("Segoe UI", 13, "bold")).pack(
+        anchor="w", padx=12, pady=(10, 4)
+    )
+    ctk.CTkLabel(actions_scroll, text="Map a spoken phrase to a shell command.").pack(
+        anchor="w", padx=12, pady=(0, 6)
+    )
+
+    actions_textbox = ctk.CTkTextbox(actions_scroll, height=160)
+    actions_textbox.pack(fill="x", padx=12, pady=4)
 
     phrase_var = tk.StringVar()
     command_var = tk.StringVar()
 
-    tk.Label(actions_tab, text="Phrase").grid(row=2, column=0, **pad)
-    tk.Entry(actions_tab, textvariable=phrase_var, width=30).grid(row=2, column=1, **pad)
+    action_input_card = ctk.CTkFrame(actions_scroll)
+    action_input_card.pack(fill="x", padx=12, pady=6)
 
-    tk.Label(actions_tab, text="Command").grid(row=3, column=0, **pad)
-    tk.Entry(actions_tab, textvariable=command_var, width=30).grid(row=3, column=1, **pad)
-
-    tk.Button(actions_tab, text="Add Action", command=_add_action).grid(row=4, column=0, padx=10, pady=6, sticky="w")
-    tk.Button(actions_tab, text="Remove Selected", command=_remove_action).grid(
-        row=4, column=1, padx=10, pady=6, sticky="w"
+    act_r1 = ctk.CTkFrame(action_input_card, fg_color="transparent")
+    act_r1.pack(fill="x", padx=12, pady=(8, 4))
+    ctk.CTkLabel(act_r1, text="Phrase", width=100).pack(side="left")
+    ctk.CTkEntry(act_r1, textvariable=phrase_var, width=300, placeholder_text="e.g. lock my computer").pack(
+        side="left", padx=(0, 10)
     )
 
+    act_r2 = ctk.CTkFrame(action_input_card, fg_color="transparent")
+    act_r2.pack(fill="x", padx=12, pady=(4, 8))
+    ctk.CTkLabel(act_r2, text="Command", width=100).pack(side="left")
+    ctk.CTkEntry(act_r2, textvariable=command_var, width=300, placeholder_text="e.g. rundll32.exe user32.dll,LockWorkStation").pack(
+        side="left", padx=(0, 10)
+    )
+
+    action_btn_row = ctk.CTkFrame(actions_scroll, fg_color="transparent")
+    action_btn_row.pack(fill="x", padx=12, pady=4)
+    ctk.CTkButton(action_btn_row, text="Add Action", command=_add_action, width=130).pack(side="left", padx=4)
+    ctk.CTkButton(action_btn_row, text="Remove Last", command=_remove_action, width=130,
+                   fg_color=("#cc3333", "#cc3333"), hover_color=("#aa2222", "#aa2222")).pack(
+        side="left", padx=4
+    )
+
+    # =========================================================================
+    #  Init
+    # =========================================================================
     _refresh_actions()
     _refresh_apps()
     _refresh_aliases()
