@@ -28,6 +28,10 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     alias_target_var = state["alias_target_var"]
     phrase_var = state["phrase_var"]
     command_var = state["command_var"]
+    discord_ch_name_var = state["discord_ch_name_var"]
+    discord_ch_url_var = state["discord_ch_url_var"]
+    discord_bot_token_var = state["discord_bot_token_var"]
+    discord_server_id_var = state["discord_server_id_var"]
 
     _load_logo = callbacks["load_logo"]
     _save = callbacks["save"]
@@ -48,6 +52,8 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     _remove_action = callbacks["remove_action"]
     _record_hotkey = callbacks["record_hotkey"]
     _record_hold_key = callbacks["record_hold_key"]
+    _add_discord_channel = callbacks["add_discord_channel"]
+    _remove_discord_channel = callbacks["remove_discord_channel"]
 
     def _toggle_theme():
         new_mode = "dark" if state["theme_var"].get() else "light"
@@ -317,10 +323,65 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
         side="left", padx=4
     )
 
+    # ---- DISCORD SECTION (in Apps tab) ----
+    ctk.CTkLabel(apps_scroll, text="Discord", font=("Segoe UI", 13, "bold")).pack(
+        anchor="w", padx=12, pady=(16, 4)
+    )
+    discord_creds_card = ctk.CTkFrame(apps_scroll)
+    discord_creds_card.pack(fill="x", padx=12, pady=4)
+
+    disc_token_row = ctk.CTkFrame(discord_creds_card, fg_color="transparent")
+    disc_token_row.pack(fill="x", padx=12, pady=(8, 4))
+    ctk.CTkLabel(disc_token_row, text="Bot Token", width=120).pack(side="left")
+    ctk.CTkEntry(disc_token_row, textvariable=discord_bot_token_var, width=320, show="*",
+                 placeholder_text="Bot token from Discord Developer Portal").pack(side="left", padx=(0, 10))
+
+    disc_guild_row = ctk.CTkFrame(discord_creds_card, fg_color="transparent")
+    disc_guild_row.pack(fill="x", padx=12, pady=(4, 8))
+    ctk.CTkLabel(disc_guild_row, text="Server ID", width=120).pack(side="left")
+    ctk.CTkEntry(disc_guild_row, textvariable=discord_server_id_var, width=220,
+                 placeholder_text="Right-click server → Copy Server ID").pack(side="left", padx=(0, 10))
+
+    ctk.CTkLabel(apps_scroll, text="Discord Channels", font=("Segoe UI", 13, "bold")).pack(
+        anchor="w", padx=12, pady=(16, 4)
+    )
+    ctk.CTkLabel(apps_scroll, text="Say \"discord <channel> <message>\" to post to a channel.").pack(
+        anchor="w", padx=12, pady=(0, 6)
+    )
+
+    discord_channels_textbox = ctk.CTkTextbox(apps_scroll, height=80)
+    discord_channels_textbox.pack(fill="x", padx=12, pady=4)
+
+    discord_input_card = ctk.CTkFrame(apps_scroll)
+    discord_input_card.pack(fill="x", padx=12, pady=6)
+
+    disc_r1 = ctk.CTkFrame(discord_input_card, fg_color="transparent")
+    disc_r1.pack(fill="x", padx=12, pady=(8, 4))
+    ctk.CTkLabel(disc_r1, text="Channel name", width=120).pack(side="left")
+    ctk.CTkEntry(disc_r1, textvariable=discord_ch_name_var, width=220, placeholder_text="e.g. general").pack(
+        side="left", padx=(0, 10)
+    )
+
+    disc_r2 = ctk.CTkFrame(discord_input_card, fg_color="transparent")
+    disc_r2.pack(fill="x", padx=12, pady=(4, 8))
+    ctk.CTkLabel(disc_r2, text="Webhook URL", width=120).pack(side="left")
+    ctk.CTkEntry(disc_r2, textvariable=discord_ch_url_var, width=320, placeholder_text="https://discord.com/api/webhooks/...").pack(
+        side="left", padx=(0, 10)
+    )
+
+    discord_btn_row = ctk.CTkFrame(apps_scroll, fg_color="transparent")
+    discord_btn_row.pack(fill="x", padx=12, pady=4)
+    ctk.CTkButton(discord_btn_row, text="Add Channel", command=_add_discord_channel, width=120).pack(side="left", padx=4)
+    ctk.CTkButton(discord_btn_row, text="Remove Last", command=_remove_discord_channel, width=120,
+                   fg_color=("#cc3333", "#cc3333"), hover_color=("#aa2222", "#aa2222")).pack(
+        side="left", padx=4
+    )
+
     return {
         "apps_textbox": apps_textbox,
         "aliases_textbox": aliases_textbox,
         "actions_textbox": actions_textbox,
         "history_textbox": history_textbox,
+        "discord_channels_textbox": discord_channels_textbox,
         "tabview": tabview,
     }

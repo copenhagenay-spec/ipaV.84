@@ -244,6 +244,12 @@ def main() -> None:
         for alias, target in aliases_cfg.items():
             aliases.append({"alias": str(alias).lower(), "target": str(target).lower()})
 
+    discord_channels = []
+    discord_cfg = cfg.get("discord_channels", {})
+    if isinstance(discord_cfg, dict):
+        for name, url in discord_cfg.items():
+            discord_channels.append({"name": str(name).lower(), "url": str(url)})
+
     status_var = tk.StringVar(value="Idle")
     transcript_var = tk.StringVar(value="")
     app_name_var = tk.StringVar()
@@ -252,9 +258,14 @@ def main() -> None:
     alias_target_var = tk.StringVar()
     phrase_var = tk.StringVar()
     command_var = tk.StringVar()
+    discord_ch_name_var = tk.StringVar()
+    discord_ch_url_var = tk.StringVar()
+    discord_bot_token_var = tk.StringVar(value=cfg.get("discord_bot_token", ""))
+    discord_server_id_var = tk.StringVar(value=cfg.get("discord_server_id", ""))
     apps_textbox = None
     aliases_textbox = None
     actions_textbox = None
+    discord_channels_textbox = None
     listener = BackgroundListener()
     tray_icon = {"icon": None}
     tray_ready = {"ok": False}
@@ -299,6 +310,9 @@ def main() -> None:
             "actions": [a for a in actions if a.get("phrase") and a.get("command")],
             "apps": {a.get("name"): a.get("command") for a in apps if a.get("name") and a.get("command")},
             "app_aliases": {a.get("alias"): a.get("target") for a in aliases if a.get("alias") and a.get("target")},
+            "discord_channels": {a.get("name"): a.get("url") for a in discord_channels if a.get("name") and a.get("url")},
+            "discord_bot_token": discord_bot_token_var.get().strip(),
+            "discord_server_id": discord_server_id_var.get().strip(),
         }
         if wizard_done is not None:
             data["wizard_done"] = bool(wizard_done)
@@ -749,6 +763,33 @@ def main() -> None:
         apps.pop(-1)
         _refresh_apps()
 
+    # --- Discord channels helpers ---
+    def _refresh_discord_channels():
+        if discord_channels_textbox is None:
+            return
+        discord_channels_textbox.configure(state="normal")
+        discord_channels_textbox.delete("1.0", "end")
+        for ch in discord_channels:
+            discord_channels_textbox.insert("end", f"#{ch.get('name')}  ->  {ch.get('url')}\n")
+        discord_channels_textbox.configure(state="disabled")
+
+    def _add_discord_channel():
+        name = discord_ch_name_var.get().strip().lower()
+        url = discord_ch_url_var.get().strip()
+        if not name or not url:
+            messagebox.showerror("Invalid", "Channel name and webhook URL are required.")
+            return
+        discord_channels.append({"name": name, "url": url})
+        discord_ch_name_var.set("")
+        discord_ch_url_var.set("")
+        _refresh_discord_channels()
+
+    def _remove_discord_channel():
+        if not discord_channels:
+            return
+        discord_channels.pop(-1)
+        _refresh_discord_channels()
+
     def _import_steam():
         try:
             found = find_steam_apps()
@@ -937,7 +978,7 @@ def main() -> None:
         root.after(400, _poll_minimize)
 
     def _install_deps():
-        deps = ["sounddevice", "vosk", "pynput", "pystray", "pillow", "customtkinter"]
+        deps = ["sounddevice", "vosk", "pynput", "pystray", "pillow", "customtkinter", "pyttsx3"]
         status_var.set("Installing dependencies...")
 
         def _run():
@@ -1034,6 +1075,10 @@ def main() -> None:
         "alias_target_var": alias_target_var,
         "phrase_var": phrase_var,
         "command_var": command_var,
+        "discord_ch_name_var": discord_ch_name_var,
+        "discord_ch_url_var": discord_ch_url_var,
+        "discord_bot_token_var": discord_bot_token_var,
+        "discord_server_id_var": discord_server_id_var,
     }
 
     callbacks_ui = {
@@ -1056,6 +1101,8 @@ def main() -> None:
         "remove_action": _remove_action,
         "record_hotkey": _record_hotkey,
         "record_hold_key": _record_hold_key,
+        "add_discord_channel": _add_discord_channel,
+        "remove_discord_channel": _remove_discord_channel,
     }
 
     constants = {
@@ -1068,6 +1115,7 @@ def main() -> None:
     aliases_textbox = widgets.get("aliases_textbox")
     actions_textbox = widgets.get("actions_textbox")
     history_textbox = widgets.get("history_textbox")
+    discord_channels_textbox = widgets.get("discord_channels_textbox")
     transcript_history = []
 
     def _update_transcript(text: str):
@@ -1087,6 +1135,7 @@ def main() -> None:
     _refresh_actions()
     _refresh_apps()
     _refresh_aliases()
+    _refresh_discord_channels()
     if not cfg.get("wizard_done"):
         _run_wizard()
     else:

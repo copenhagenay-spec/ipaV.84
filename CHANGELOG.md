@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.84.7
+- Added text-to-speech (TTS): say `read out <text>` to have IPA speak any text aloud.
+- Added Discord integration: send messages to a Discord channel via voice command (`discord <channel> <message>`).
+- Added Discord bot support: say `read discord <channel>` to hear the last message from a channel read aloud.
+- Added Discord credentials section in the Apps tab (Bot Token, Server ID, per-channel webhook URLs).
+- Added pyttsx3 to setup.cmd dependencies.
+
 ## 0.84.6.4
 - Added "restart assistant" voice command — restarts IPA instantly.
 - Added "type <text>" voice command — simulates keyboard input of any text.

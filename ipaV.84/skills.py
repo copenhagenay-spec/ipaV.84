@@ -545,6 +545,11 @@ def _show_help() -> None:
         "  sleep computer",
         "  restart assistant",
         "  type <text>",
+        "  read out <text>",
+        "",
+        "Discord:",
+        "  discord <channel> <message>",
+        "  read discord <channel>",
         "",
         "Help:",
         "  what can i say",
@@ -609,6 +614,152 @@ def _type_text(text: str) -> bool:
         return False
 
 
+def _tts_speak(text: str) -> bool:
+    try:
+        import pyttsx3  # type: ignore
+        def _run():
+            try:
+                engine = pyttsx3.init()
+                engine.say(text)
+                engine.runAndWait()
+            except Exception as e:
+                _log_event(f"TTS_ERROR: {e}")
+        threading.Thread(target=_run, daemon=True).start()
+        _log_event(f"TTS_SPEAK: {text}")
+        return True
+    except Exception as exc:
+        print(f"TTS failed: {exc}")
+        _log_event(f"TTS_FAILED: {exc}")
+        return False
+
+
+def _discord_read(channel_name: str) -> bool:
+    cfg = load_config()
+    token = cfg.get("discord_bot_token", "").strip()
+    guild_id = cfg.get("discord_server_id", "").strip()
+
+    if not token:
+        print("Discord bot token not configured.")
+        _log_event("DISCORD_READ_FAILED: no bot token")
+        return False
+    if not guild_id:
+        print("Discord server ID not configured.")
+        _log_event("DISCORD_READ_FAILED: no server ID")
+        return False
+
+    try:
+        import json
+        import urllib.request
+        import urllib.error
+
+        headers = {
+            "Authorization": f"Bot {token}",
+            "User-Agent": "IPA-Assistant/1.0",
+        }
+
+        req = urllib.request.Request(
+            f"https://discord.com/api/v10/guilds/{guild_id}/channels",
+            headers=headers,
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            channels = json.loads(resp.read().decode("utf-8"))
+
+        channel_id = None
+        for ch in channels:
+            if ch.get("type") == 0 and ch.get("name", "").lower() == channel_name.lower():
+                channel_id = ch["id"]
+                break
+
+        if not channel_id:
+            _log_event(f"DISCORD_READ_FAILED: channel not found: {channel_name}")
+            _tts_speak(f"Channel {channel_name} not found.")
+            return False
+
+        req = urllib.request.Request(
+            f"https://discord.com/api/v10/channels/{channel_id}/messages?limit=1",
+            headers=headers,
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            messages = json.loads(resp.read().decode("utf-8"))
+
+        if not messages:
+            _tts_speak(f"No messages in {channel_name}.")
+            return True
+
+        msg = messages[0]
+        author = msg.get("author", {}).get("username", "Unknown")
+        content = msg.get("content", "").strip()
+
+        if not content:
+            _tts_speak(f"Last message in {channel_name} has no text.")
+            return True
+
+        _tts_speak(f"{author} said: {content}")
+        _log_event(f"DISCORD_READ: #{channel_name}: {author}: {content}")
+        return True
+
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read().decode("utf-8")
+        except Exception:
+            body = "(no body)"
+        print(f"Failed to read Discord: {exc} — {body}")
+        _log_event(f"DISCORD_READ_FAILED: {exc} — {body}")
+        return False
+    except Exception as exc:
+        print(f"Failed to read Discord: {exc}")
+        _log_event(f"DISCORD_READ_FAILED: {exc}")
+        return False
+
+
+def _discord_send(channel_name: str, message: str) -> bool:
+    cfg = load_config()
+    channels = cfg.get("discord_channels", {})
+    if not isinstance(channels, dict):
+        channels = {}
+
+    webhook_url = channels.get(channel_name)
+    if not webhook_url:
+        norm_map = {_normalize_name(k): v for k, v in channels.items()}
+        webhook_url = norm_map.get(_normalize_name(channel_name))
+
+    if not webhook_url:
+        print(f"Discord channel not configured: {channel_name}")
+        _log_event(f"DISCORD_CHANNEL_NOT_FOUND: {channel_name}")
+        return False
+
+    try:
+        import json
+        import urllib.request
+        import urllib.error
+        data = json.dumps({"content": message}).encode("utf-8")
+        req = urllib.request.Request(
+            webhook_url,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "IPA-Assistant/1.0",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10):
+            pass
+        _log_event(f"DISCORD_SENT: #{channel_name}: {message}")
+        return True
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read().decode("utf-8")
+        except Exception:
+            body = "(no body)"
+        print(f"Failed to send Discord message: {exc} — {body}")
+        _log_event(f"DISCORD_SEND_FAILED: {exc} — {body}")
+        return False
+    except Exception as exc:
+        print(f"Failed to send Discord message: {exc}")
+        _log_event(f"DISCORD_SEND_FAILED: {exc}")
+        return False
+
+
 def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, restart_fn=None) -> bool:
     """
     Try to match transcript to skills.
@@ -636,6 +787,26 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
     if type_match:
         text_to_type = type_match.group(1).strip()
         _type_text(text_to_type)
+        return True
+
+    # TTS
+    say_match = re.search(r"\bread\s+out\s+(.+)$", t)
+    if say_match:
+        _tts_speak(say_match.group(1).strip())
+        return True
+
+    # Discord read
+    discord_read_match = re.search(r"\bread\s+discord\s+(\w+)\b", t)
+    if discord_read_match:
+        threading.Thread(target=_discord_read, args=(discord_read_match.group(1).strip(),), daemon=True).start()
+        return True
+
+    # Discord send
+    discord_match = re.search(r"\bdiscord\s+(\w+)\s+(.+)$", t)
+    if discord_match:
+        channel = discord_match.group(1).strip()
+        msg = discord_match.group(2).strip()
+        _discord_send(channel, msg)
         return True
 
     # Notes
