@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.84.8.2
+- Fixed crash on launch: gemini_api_key_var missing from assistant.py state dict
+
 ## 0.84.8.1
 - AI now injects today's date into the prompt so it knows the current date
 - Switched default Groq model to llama-3.3-70b-versatile (December 2023 cutoff, smarter responses)

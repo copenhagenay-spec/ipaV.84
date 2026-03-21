@@ -275,6 +275,7 @@ def main() -> None:
     discord_ch_url_var = tk.StringVar()
     discord_bot_token_var = tk.StringVar(value=cfg.get("discord_bot_token", ""))
     discord_server_id_var = tk.StringVar(value=cfg.get("discord_server_id", ""))
+    gemini_api_key_var = tk.StringVar(value=cfg.get("gemini_api_key", ""))
     keybind_phrase_var = tk.StringVar()
     keybind_key_var = tk.StringVar()
     keybind_count_var = tk.StringVar(value="1")
@@ -330,6 +331,7 @@ def main() -> None:
             "discord_channels": {a.get("name"): a.get("url") for a in discord_channels if a.get("name") and a.get("url")},
             "discord_bot_token": discord_bot_token_var.get().strip(),
             "discord_server_id": discord_server_id_var.get().strip(),
+            "gemini_api_key": gemini_api_key_var.get().strip(),
             "keybinds": [k for k in keybinds if k.get("phrase") and k.get("key")],
         }
         if wizard_done is not None:
@@ -1131,6 +1133,7 @@ def main() -> None:
         "discord_ch_url_var": discord_ch_url_var,
         "discord_bot_token_var": discord_bot_token_var,
         "discord_server_id_var": discord_server_id_var,
+        "gemini_api_key_var": gemini_api_key_var,
         "keybind_phrase_var": keybind_phrase_var,
         "keybind_key_var": keybind_key_var,
         "keybind_count_var": keybind_count_var,
