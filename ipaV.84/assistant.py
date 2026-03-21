@@ -250,6 +250,19 @@ def main() -> None:
         for name, url in discord_cfg.items():
             discord_channels.append({"name": str(name).lower(), "url": str(url)})
 
+    keybinds = cfg.get("keybinds", [])
+    if not isinstance(keybinds, list):
+        keybinds = []
+    keybinds = [
+        {
+            "phrase": str(k.get("phrase", "")).strip().lower(),
+            "key": str(k.get("key", "")).strip(),
+            "count": int(k.get("count", 1)),
+        }
+        for k in keybinds
+        if isinstance(k, dict)
+    ]
+
     status_var = tk.StringVar(value="Idle")
     transcript_var = tk.StringVar(value="")
     app_name_var = tk.StringVar()
@@ -262,10 +275,14 @@ def main() -> None:
     discord_ch_url_var = tk.StringVar()
     discord_bot_token_var = tk.StringVar(value=cfg.get("discord_bot_token", ""))
     discord_server_id_var = tk.StringVar(value=cfg.get("discord_server_id", ""))
+    keybind_phrase_var = tk.StringVar()
+    keybind_key_var = tk.StringVar()
+    keybind_count_var = tk.StringVar(value="1")
     apps_textbox = None
     aliases_textbox = None
     actions_textbox = None
     discord_channels_textbox = None
+    keybinds_textbox = None
     listener = BackgroundListener()
     tray_icon = {"icon": None}
     tray_ready = {"ok": False}
@@ -313,6 +330,7 @@ def main() -> None:
             "discord_channels": {a.get("name"): a.get("url") for a in discord_channels if a.get("name") and a.get("url")},
             "discord_bot_token": discord_bot_token_var.get().strip(),
             "discord_server_id": discord_server_id_var.get().strip(),
+            "keybinds": [k for k in keybinds if k.get("phrase") and k.get("key")],
         }
         if wizard_done is not None:
             data["wizard_done"] = bool(wizard_done)
@@ -790,6 +808,40 @@ def main() -> None:
         discord_channels.pop(-1)
         _refresh_discord_channels()
 
+    # --- Keybinds helpers ---
+    def _refresh_keybinds():
+        if keybinds_textbox is None:
+            return
+        keybinds_textbox.configure(state="normal")
+        keybinds_textbox.delete("1.0", "end")
+        for kb in keybinds:
+            count = kb.get("count", 1)
+            suffix = f" x{count}" if int(count) > 1 else ""
+            keybinds_textbox.insert("end", f"{kb.get('phrase')}  ->  {kb.get('key')}{suffix}\n")
+        keybinds_textbox.configure(state="disabled")
+
+    def _add_keybind():
+        phrase = keybind_phrase_var.get().strip().lower()
+        key = keybind_key_var.get().strip()
+        try:
+            count = max(1, int(keybind_count_var.get().strip()))
+        except Exception:
+            count = 1
+        if not phrase or not key:
+            messagebox.showerror("Invalid", "Phrase and key are required.")
+            return
+        keybinds.append({"phrase": phrase, "key": key, "count": count})
+        keybind_phrase_var.set("")
+        keybind_key_var.set("")
+        keybind_count_var.set("1")
+        _refresh_keybinds()
+
+    def _remove_keybind():
+        if not keybinds:
+            return
+        keybinds.pop(-1)
+        _refresh_keybinds()
+
     def _import_steam():
         try:
             found = find_steam_apps()
@@ -1079,6 +1131,9 @@ def main() -> None:
         "discord_ch_url_var": discord_ch_url_var,
         "discord_bot_token_var": discord_bot_token_var,
         "discord_server_id_var": discord_server_id_var,
+        "keybind_phrase_var": keybind_phrase_var,
+        "keybind_key_var": keybind_key_var,
+        "keybind_count_var": keybind_count_var,
     }
 
     callbacks_ui = {
@@ -1103,6 +1158,9 @@ def main() -> None:
         "record_hold_key": _record_hold_key,
         "add_discord_channel": _add_discord_channel,
         "remove_discord_channel": _remove_discord_channel,
+        "add_keybind": _add_keybind,
+        "remove_keybind": _remove_keybind,
+        "record_keybind_key": _record_hold_key,
     }
 
     constants = {
@@ -1116,6 +1174,7 @@ def main() -> None:
     actions_textbox = widgets.get("actions_textbox")
     history_textbox = widgets.get("history_textbox")
     discord_channels_textbox = widgets.get("discord_channels_textbox")
+    keybinds_textbox = widgets.get("keybinds_textbox")
     transcript_history = []
 
     def _update_transcript(text: str):
@@ -1136,6 +1195,7 @@ def main() -> None:
     _refresh_apps()
     _refresh_aliases()
     _refresh_discord_channels()
+    _refresh_keybinds()
     if not cfg.get("wizard_done"):
         _run_wizard()
     else:

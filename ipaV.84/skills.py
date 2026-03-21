@@ -545,11 +545,18 @@ def _show_help() -> None:
         "  sleep computer",
         "  restart assistant",
         "  type <text>",
+        "  send message <text>",
         "  read out <text>",
         "",
         "Discord:",
         "  discord <channel> <message>",
         "  read discord <channel>",
+        "",
+        "AI:",
+        "  ask <question>",
+        "",
+        "Key Binds:",
+        "  <your phrase>  (configured in Actions tab)",
         "",
         "Help:",
         "  what can i say",
@@ -601,6 +608,48 @@ def _show_help() -> None:
         print(f"Help display failed: {exc}")
 
 
+def _press_key(key: str, count: int = 1) -> bool:
+    try:
+        from pynput import keyboard  # type: ignore
+        ctl = keyboard.Controller()
+        raw = str(key).strip().lower()
+        if raw.startswith("<") and raw.endswith(">"):
+            raw = raw[1:-1].strip()
+        if len(raw) == 1:
+            key_obj = keyboard.KeyCode.from_char(raw)
+        else:
+            key_obj = getattr(keyboard.Key, raw, None)
+            if key_obj is None:
+                _log_event(f"PRESS_KEY_FAILED: unknown key: {key}")
+                return False
+        for i in range(max(1, count)):
+            ctl.press(key_obj)
+            ctl.release(key_obj)
+            if count > 1 and i < count - 1:
+                time.sleep(0.1)
+        _log_event(f"PRESS_KEY: {key} x{count}")
+        return True
+    except Exception as exc:
+        _log_event(f"PRESS_KEY_FAILED: {exc}")
+        return False
+
+
+def _send_message(text: str) -> bool:
+    try:
+        from pynput.keyboard import Controller, Key  # type: ignore
+        time.sleep(0.3)
+        ctl = Controller()
+        ctl.type(text)
+        time.sleep(0.5)
+        ctl.press(Key.enter)
+        ctl.release(Key.enter)
+        _log_event(f"SEND_MESSAGE: {text}")
+        return True
+    except Exception as exc:
+        _log_event(f"SEND_MESSAGE_FAILED: {exc}")
+        return False
+
+
 def _type_text(text: str) -> bool:
     try:
         from pynput.keyboard import Controller  # type: ignore
@@ -612,6 +661,77 @@ def _type_text(text: str) -> bool:
         print(f"Failed to type text: {exc}")
         _log_event(f"TYPE_TEXT_FAILED: {exc}")
         return False
+
+
+def _ask_ai(question: str) -> bool:
+    cfg = load_config()
+    api_key = cfg.get("gemini_api_key", "").strip()
+    if not api_key:
+        _log_event("ASK_AI_FAILED: no AI API key configured")
+        _tts_speak("No AI API key configured. Please add your Groq key in settings.")
+        return False
+
+    prompt = (
+        f"{question.strip()}\n\n"
+        "Answer in 2 to 3 sentences maximum. Be direct and concise."
+    )
+
+    def _run():
+        try:
+            import json
+            import urllib.request
+            import urllib.error
+
+            if api_key.startswith("sk-"):
+                url = "https://api.openai.com/v1/chat/completions"
+                model = "gpt-4o-mini"
+            else:
+                url = "https://api.groq.com/openai/v1/chat/completions"
+                model = "llama-3.1-8b-instant"
+
+            body = json.dumps({
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 150,
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                    "User-Agent": "IPA-Assistant/1.0",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+
+            answer = (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
+            if not answer:
+                _log_event("ASK_AI_FAILED: empty response")
+                _tts_speak("I didn't get a response from the AI.")
+                return
+            _log_event(f"ASK_AI: {question} -> {answer}")
+            _tts_speak(answer)
+        except urllib.error.HTTPError as exc:
+            try:
+                body = exc.read().decode("utf-8")
+            except Exception:
+                body = "(no body)"
+            _log_event(f"ASK_AI_FAILED: {exc} — {body}")
+            _tts_speak("AI request failed. Check your API key.")
+        except Exception as exc:
+            _log_event(f"ASK_AI_FAILED: {exc}")
+            _tts_speak("AI request failed.")
+
+    threading.Thread(target=_run, daemon=True).start()
+    return True
 
 
 def _tts_speak(text: str) -> bool:
@@ -780,6 +900,33 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
         _log_event("RESTART_IPA: voice command")
         if restart_fn is not None:
             threading.Thread(target=restart_fn, daemon=True).start()
+        return True
+
+    # Key binds
+    cfg_early = load_config()
+    keybinds = cfg_early.get("keybinds", [])
+    if isinstance(keybinds, list) and keybinds:
+        norm_t = _normalize_text(t)
+        for kb in keybinds:
+            phrase = str(kb.get("phrase", "")).strip().lower()
+            key = str(kb.get("key", "")).strip()
+            count = int(kb.get("count", 1))
+            if not phrase or not key:
+                continue
+            if _normalize_text(phrase) == norm_t:
+                _press_key(key, count)
+                return True
+
+    # Send message (type + Enter)
+    send_match = re.search(r"\bsend\s+message\s+(.+)$", t)
+    if send_match:
+        _send_message(send_match.group(1).strip())
+        return True
+
+    # Ask AI
+    ask_match = re.search(r"^ask\s+(.+)$", t)
+    if ask_match:
+        _ask_ai(ask_match.group(1).strip())
         return True
 
     # Type text

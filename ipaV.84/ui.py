@@ -32,6 +32,10 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     discord_ch_url_var = state["discord_ch_url_var"]
     discord_bot_token_var = state["discord_bot_token_var"]
     discord_server_id_var = state["discord_server_id_var"]
+    gemini_api_key_var = state["gemini_api_key_var"]
+    keybind_phrase_var = state["keybind_phrase_var"]
+    keybind_key_var = state["keybind_key_var"]
+    keybind_count_var = state["keybind_count_var"]
 
     _load_logo = callbacks["load_logo"]
     _save = callbacks["save"]
@@ -54,6 +58,9 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     _record_hold_key = callbacks["record_hold_key"]
     _add_discord_channel = callbacks["add_discord_channel"]
     _remove_discord_channel = callbacks["remove_discord_channel"]
+    _add_keybind = callbacks["add_keybind"]
+    _remove_keybind = callbacks["remove_keybind"]
+    _record_keybind_key = callbacks["record_keybind_key"]
 
     def _toggle_theme():
         new_mode = "dark" if state["theme_var"].get() else "light"
@@ -323,6 +330,75 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
         side="left", padx=4
     )
 
+    # ---- KEY BINDS SECTION (in Actions tab) ----
+    ctk.CTkLabel(actions_scroll, text="Key Binds", font=("Segoe UI", 13, "bold")).pack(
+        anchor="w", padx=12, pady=(16, 4)
+    )
+    ctk.CTkLabel(actions_scroll, text="Say a phrase to press a key (e.g. \"reload\" → r).").pack(
+        anchor="w", padx=12, pady=(0, 2)
+    )
+    ctk.CTkLabel(
+        actions_scroll,
+        text="⚠ Do not use in games protected by EAC or BattlEye — synthetic input may be flagged.",
+        text_color=("#cc7700", "#ffaa00"),
+        wraplength=520,
+    ).pack(anchor="w", padx=12, pady=(0, 6))
+
+    keybinds_textbox = ctk.CTkTextbox(actions_scroll, height=100)
+    keybinds_textbox.pack(fill="x", padx=12, pady=4)
+
+    kb_input_card = ctk.CTkFrame(actions_scroll)
+    kb_input_card.pack(fill="x", padx=12, pady=6)
+
+    kb_r1 = ctk.CTkFrame(kb_input_card, fg_color="transparent")
+    kb_r1.pack(fill="x", padx=12, pady=(8, 4))
+    ctk.CTkLabel(kb_r1, text="Phrase", width=100).pack(side="left")
+    ctk.CTkEntry(kb_r1, textvariable=keybind_phrase_var, width=240, placeholder_text="e.g. reload").pack(
+        side="left", padx=(0, 10)
+    )
+
+    kb_r2 = ctk.CTkFrame(kb_input_card, fg_color="transparent")
+    kb_r2.pack(fill="x", padx=12, pady=(4, 4))
+    ctk.CTkLabel(kb_r2, text="Key", width=100).pack(side="left")
+    ctk.CTkEntry(kb_r2, textvariable=keybind_key_var, width=120, placeholder_text="e.g. r").pack(
+        side="left", padx=(0, 10)
+    )
+    ctk.CTkButton(kb_r2, text="Record", command=lambda: _record_keybind_key(keybind_key_var), width=90).pack(
+        side="left"
+    )
+
+    kb_r3 = ctk.CTkFrame(kb_input_card, fg_color="transparent")
+    kb_r3.pack(fill="x", padx=12, pady=(4, 8))
+    ctk.CTkLabel(kb_r3, text="Count", width=100).pack(side="left")
+    ctk.CTkEntry(kb_r3, textvariable=keybind_count_var, width=60, placeholder_text="1").pack(
+        side="left", padx=(0, 10)
+    )
+    ctk.CTkLabel(kb_r3, text="(how many times to press)", text_color=("gray50", "gray60")).pack(side="left")
+
+    kb_btn_row = ctk.CTkFrame(actions_scroll, fg_color="transparent")
+    kb_btn_row.pack(fill="x", padx=12, pady=4)
+    ctk.CTkButton(kb_btn_row, text="Add Key Bind", command=_add_keybind, width=130).pack(side="left", padx=4)
+    ctk.CTkButton(kb_btn_row, text="Remove Last", command=_remove_keybind, width=130,
+                   fg_color=("#cc3333", "#cc3333"), hover_color=("#aa2222", "#aa2222")).pack(
+        side="left", padx=4
+    )
+
+    # ---- AI SECTION (in Apps tab) ----
+    ctk.CTkLabel(apps_scroll, text="AI (Groq)", font=("Segoe UI", 13, "bold")).pack(
+        anchor="w", padx=12, pady=(16, 4)
+    )
+    ctk.CTkLabel(apps_scroll, text="Say \"ask <question>\" to query AI. Get your free key at console.groq.com → API Keys.").pack(
+        anchor="w", padx=12, pady=(0, 6)
+    )
+    ai_card = ctk.CTkFrame(apps_scroll)
+    ai_card.pack(fill="x", padx=12, pady=4)
+
+    ai_key_row = ctk.CTkFrame(ai_card, fg_color="transparent")
+    ai_key_row.pack(fill="x", padx=12, pady=(8, 8))
+    ctk.CTkLabel(ai_key_row, text="API Key", width=120).pack(side="left")
+    ctk.CTkEntry(ai_key_row, textvariable=gemini_api_key_var, width=320, show="*",
+                 placeholder_text="Groq API key from console.groq.com").pack(side="left", padx=(0, 10))
+
     # ---- DISCORD SECTION (in Apps tab) ----
     ctk.CTkLabel(apps_scroll, text="Discord", font=("Segoe UI", 13, "bold")).pack(
         anchor="w", padx=12, pady=(16, 4)
@@ -383,5 +459,6 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
         "actions_textbox": actions_textbox,
         "history_textbox": history_textbox,
         "discord_channels_textbox": discord_channels_textbox,
+        "keybinds_textbox": keybinds_textbox,
         "tabview": tabview,
     }
