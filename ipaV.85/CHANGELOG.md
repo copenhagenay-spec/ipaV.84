@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.85.0
+- Close app by voice — "close <app name>" or "close this"
+- Auto-discover common apps on startup (Chrome, Firefox, Edge, Opera GX, Discord, Steam, VLC, OBS, and more)
+- Spotify search by voice — "spotify <query>" or "spotify play <query>"
+- "What can I say" UI overhauled — dark themed, section cards, colored placeholders
+- Help window now opens in background thread — PTT stays active while it's open
+- App list in "What Can I Say" now shows only relevant discovered apps, not full Steam library
+- Open last app again — "open that again"
+- Full documentation added — setup, commands, adding apps, AI setup, Discord setup
+- Key binds (keypress commands) temporarily disabled pending reliability improvements
+- Wizard shortcut creation fixed — no more duplicate Start Menu entries
+
 ## 0.84.9.0
 - Switched AI backend to Groq (free, no quota issues) — also auto-detects Claude and OpenAI API keys
 - Added standard English model option in wizard (vosk-model-en-us-0.22-lgraph, ~128MB, better accuracy)

@@ -13,7 +13,7 @@ Offline personal assistant for Windows using Vosk speech recognition.
 
 IPA will run in the background after the wizard finishes. Look for the icon in your system tray.
 
-For a detailed walkthrough see the [Setup Guide](ipaV.84/docs/setup.md).
+For a detailed walkthrough see the [Setup Guide](ipaV.85/docs/setup.md).
 
 ---
 
@@ -21,11 +21,11 @@ For a detailed walkthrough see the [Setup Guide](ipaV.84/docs/setup.md).
 
 | Guide | Description |
 |---|---|
-| [Setup Guide](ipaV.84/docs/setup.md) | Full installation and first-time setup walkthrough |
-| [Voice Commands](ipaV.84/docs/commands.md) | Complete list of voice commands with examples |
-| [Adding Apps](ipaV.84/docs/adding-apps.md) | How to add apps, import Steam games, and create aliases |
-| [AI Setup](ipaV.84/docs/ai-setup.md) | Setting up Groq, Claude, or OpenAI for the ask command |
-| [Discord Setup](ipaV.84/docs/discord.md) | Configuring Discord send and read commands |
+| [Setup Guide](ipaV.85/docs/setup.md) | Full installation and first-time setup walkthrough |
+| [Voice Commands](ipaV.85/docs/commands.md) | Complete list of voice commands with examples |
+| [Adding Apps](ipaV.85/docs/adding-apps.md) | How to add apps, import Steam games, and create aliases |
+| [AI Setup](ipaV.85/docs/ai-setup.md) | Setting up Groq, Claude, or OpenAI for the ask command |
+| [Discord Setup](ipaV.85/docs/discord.md) | Configuring Discord send and read commands |
 
 ---
 

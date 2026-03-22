@@ -329,6 +329,18 @@ def _media_key(action: str) -> bool:
         print(f"Failed to send media key: {exc}")
         return False
 
+def _spotify_search(query: str) -> bool:
+    try:
+        import webbrowser
+        if query:
+            webbrowser.open(f"spotify:search:{quote_plus(query)}")
+        else:
+            webbrowser.open("spotify:")
+        return True
+    except Exception:
+        return False
+
+
 def _youtube_search(query: str) -> bool:
     if not query:
         url = "https://www.youtube.com/"
@@ -477,6 +489,51 @@ def _add_alias(alias: str, target: str) -> bool:
         return False
 
 
+_last_app: dict = {"name": None, "command": None}
+
+
+_CLOSE_OVERRIDES = {
+    "discord": "discord.exe",
+    "steam": "steam.exe",
+    "spotify": "spotify.exe",
+    "chrome": "chrome.exe",
+    "firefox": "firefox.exe",
+    "edge": "msedge.exe",
+    "opera gx": "opera.exe",
+    "opera": "opera.exe",
+    "notepad": "notepad.exe",
+    "task manager": "taskmgr.exe",
+}
+
+
+def _close_app(app_name: str) -> bool:
+    normalized = _normalize_name(app_name)
+    candidates = []
+
+    if normalized in _CLOSE_OVERRIDES:
+        candidates.append(_CLOSE_OVERRIDES[normalized])
+    else:
+        # fuzzy match overrides
+        match = difflib.get_close_matches(normalized, list(_CLOSE_OVERRIDES.keys()), n=1, cutoff=0.7)
+        if match:
+            candidates.append(_CLOSE_OVERRIDES[match[0]])
+
+    # Also try app name directly as exe
+    candidates.append(normalized.replace(" ", "") + ".exe")
+
+    for exe in candidates:
+        try:
+            result = subprocess.run(
+                ["taskkill", "/f", "/im", exe],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            if result.returncode == 0:
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def _open_app(app_name: str, allow_prompt: bool, confirm_fn=None) -> bool:
     cfg = load_config()
     apps = cfg.get("apps", {})
@@ -512,6 +569,8 @@ def _open_app(app_name: str, allow_prompt: bool, confirm_fn=None) -> bool:
         return True
     try:
         _run_command(command)
+        _last_app["name"] = app_name
+        _last_app["command"] = command
     except Exception as exc:
         print(f"Failed to open app '{app_name}': {exc}")
     return True
@@ -607,27 +666,124 @@ def _show_help() -> None:
             if phrase:
                 lines.append(f"  {phrase}")
 
+    SECTIONS = [
+        ("Apps & Actions", [
+            "open <app>  /  launch <app>",
+            "open that again",
+            "close <app>  /  close this",
+            "add alias <name> for <app>",
+        ]),
+        ("Web", [
+            "search for <query>",
+            "web search for <query>",
+        ]),
+        ("YouTube", [
+            "open youtube",
+            "youtube <query>  /  youtube play <query>",
+            "youtube play / pause / next / back",
+        ]),
+        ("Spotify", [
+            "spotify <query>  /  spotify play <query>",
+            "play / pause  /  skip / next  /  back / previous",
+            "sound on / sound off",
+        ]),
+        ("Timers", [
+            "set a timer <n> minutes",
+            "set a timer <n> seconds",
+            "set a timer <n> hours",
+        ]),
+        ("Notes", [
+            "note <text>",
+            "open notes  /  list notes",
+            "delete last note  /  clear all notes",
+        ]),
+        ("System", [
+            "sleep computer",
+            "restart computer  /  shut down computer",
+            "restart assistant",
+            "type <text>",
+            "send message <text>",
+            "read out <text>",
+        ]),
+        ("Discord", [
+            "discord <channel> <message>",
+            "read discord <channel>",
+        ]),
+        ("AI", [
+            "ask <question>",
+        ]),
+        ("Key Binds", [
+            "<your phrase>  (configured in Actions tab)",
+        ]),
+        ("Help", [
+            "what can i say",
+        ]),
+    ]
+
+    apps = cfg.get("apps", {})
+    non_steam = sorted(k for k, v in apps.items() if isinstance(v, str) and "steam://run" not in v)
+    app_commands = ["open <steam game name>"] + [f"open {name}" for name in non_steam]
+
+    actions = cfg.get("actions", [])
+    action_commands = []
+    if isinstance(actions, list) and actions:
+        for a in actions:
+            phrase = a.get("phrase", "").strip()
+            if phrase:
+                action_commands.append(phrase)
+
     try:
-        import tkinter as tk
-        root = tk.Tk()
+        import customtkinter as ctk
+        ctk.set_appearance_mode("dark")
+
+        root = ctk.CTk()
         root.withdraw()
-        win = tk.Toplevel(root)
+        win = ctk.CTkToplevel(root)
         win.title("What Can I Say?")
-        win.geometry("400x500")
+        win.geometry("480x620")
         win.resizable(True, True)
 
-        frame = tk.Frame(win)
-        frame.pack(fill="both", expand=True, padx=10, pady=10)
+        title = ctk.CTkLabel(win, text="What Can I Say?", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=(16, 4))
 
-        scrollbar = tk.Scrollbar(frame)
-        scrollbar.pack(side="right", fill="y")
+        divider = ctk.CTkFrame(win, height=2, fg_color="#3a3a3a")
+        divider.pack(fill="x", padx=16, pady=(0, 8))
 
-        text_widget = tk.Text(frame, yscrollcommand=scrollbar.set, wrap="word", font=("Consolas", 10))
-        text_widget.pack(side="left", fill="both", expand=True)
-        scrollbar.config(command=text_widget.yview)
+        scroll = ctk.CTkScrollableFrame(win, fg_color="transparent")
+        scroll.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
-        text_widget.insert("end", "\n".join(lines))
-        text_widget.configure(state="disabled")
+        def _add_section(title_text, items):
+            hdr = ctk.CTkLabel(scroll, text=title_text, font=ctk.CTkFont(size=13, weight="bold"),
+                               text_color="#4fa3e0", anchor="w")
+            hdr.pack(fill="x", padx=8, pady=(12, 3))
+            card = ctk.CTkFrame(scroll, fg_color="#252525", corner_radius=10)
+            card.pack(fill="x", padx=4, pady=(0, 4))
+            for i, item in enumerate(items):
+                row_bg = "#2a2a2a" if i % 2 == 0 else "#252525"
+                row = ctk.CTkFrame(card, fg_color=row_bg, corner_radius=6)
+                row.pack(fill="x", padx=6, pady=2)
+                # Split on <placeholders> and render with color
+                import re as _re
+                parts = _re.split(r"(<[^>]+>)", item)
+                inner = ctk.CTkFrame(row, fg_color="transparent")
+                inner.pack(anchor="w", padx=10, pady=5)
+                for part in parts:
+                    if part.startswith("<") and part.endswith(">"):
+                        lbl = ctk.CTkLabel(inner, text=part, font=ctk.CTkFont(size=12, slant="italic"),
+                                           text_color="#7ec8e3")
+                    else:
+                        lbl = ctk.CTkLabel(inner, text=part, font=ctk.CTkFont(size=12),
+                                           text_color="#d0d0d0")
+                    lbl.pack(side="left")
+
+        for section_title, items in SECTIONS:
+            _add_section(section_title, items)
+
+        if app_commands:
+            _add_section("Your Apps", app_commands)
+
+        if action_commands:
+            _add_section("Custom Actions", action_commands)
 
         win.protocol("WM_DELETE_WINDOW", lambda: (win.destroy(), root.destroy()))
         win.lift()
@@ -971,7 +1127,7 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
 
     # Help
     if re.search(r"\b(what can i say|show commands|show help|list commands)\b", t):
-        _show_help()
+        threading.Thread(target=_show_help, daemon=True).start()
         return True
 
     # Restart IPA
@@ -981,7 +1137,20 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
             threading.Thread(target=restart_fn, daemon=True).start()
         return True
 
-    # Key binds (disabled — under development)
+    # Key binds
+    cfg_early = load_config()
+    keybinds = cfg_early.get("keybinds", [])
+    if isinstance(keybinds, list) and keybinds:
+        norm_t = _normalize_text(t)
+        for kb in keybinds:
+            phrase = str(kb.get("phrase", "")).strip().lower()
+            key = str(kb.get("key", "")).strip()
+            count = int(kb.get("count", 1))
+            if not phrase or not key:
+                continue
+            if _normalize_text(phrase) == norm_t:
+                _press_key(key, count)
+                return True
 
     # Send message (type + Enter)
     send_match = re.search(r"\bsend\s+message\s+(.+)$", t)
@@ -1103,6 +1272,24 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
             return True
 
     # YouTube support (lightweight)
+    yt_open = re.search(r"\b(open|start|launch)\s+(you\s*tube|youtube|yt)\b", t)
+    if yt_open:
+        if _youtube_search(""):
+            return True
+
+    yt_match = re.search(r"\b(youtube|yt)\s+(.+)$", t)
+    if yt_match:
+        query = yt_match.group(2).strip()
+        # "youtube play <song>" → strip "play" prefix and search
+        play_search = re.match(r"^play\s+(.+)$", query)
+        if play_search:
+            query = play_search.group(1).strip()
+        if query in ("open", "home"):
+            return _youtube_search("")
+        if query not in ("play", "pause", "next", "skip", "previous", "back"):
+            if _youtube_search(query):
+                return True
+
     if "youtube" in t or re.search(r"\byt\b", t):
         for word, action in (
             ("next", "next"),
@@ -1115,19 +1302,6 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
             if word in t:
                 if _media_key(action):
                     return True
-
-    yt_open = re.search(r"\b(open|start|launch)\s+(you\s*tube|youtube|yt)\b", t)
-    if yt_open:
-        if _youtube_search(""):
-            return True
-
-    yt_match = re.search(r"\b(youtube|yt)\s+(.+)$", t)
-    if yt_match:
-        query = yt_match.group(2).strip()
-        if query in ("open", "home"):
-            return _youtube_search("")
-        if _youtube_search(query):
-            return True
 
     if re.search(r"\b(pause|play)\s+(video|vid)\b", t):
         if _media_key("play_pause"):
@@ -1177,6 +1351,12 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
         keywords = _get_spotify_keywords(cfg)
         has_spotify = _has_keyword(t, keywords)
         if (not require_spotify) or has_spotify:
+            sp_search = re.search(r"\bspotify\s+(?:play\s+|search\s+)?(.+)$", t)
+            if sp_search:
+                query = sp_search.group(1).strip()
+                if query not in ("play", "pause", "next", "skip", "previous", "back", "resume", "stop"):
+                    if _spotify_search(query):
+                        return True
             action = None
             if re.search(r"\b(play|pause|resume|stop)(\s+(song|track))?\b", t):
                 action = "play_pause"
@@ -1194,6 +1374,34 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
     if alias_match:
         _add_alias(alias_match.group(1).strip(), alias_match.group(2).strip())
         return True
+
+    if re.search(r"\b(open|launch|start)\s+(that|it)\s+again\b", t):
+        if _last_app["command"]:
+            try:
+                _run_command(_last_app["command"])
+                return True
+            except Exception:
+                pass
+        return False
+
+    close_current = re.search(r"\b(close|quit|exit)\s+(this|current|window)\b", t)
+    if close_current:
+        try:
+            from pynput.keyboard import Key, Controller as KbController
+            kb = KbController()
+            kb.press(Key.alt)
+            kb.press(Key.f4)
+            kb.release(Key.f4)
+            kb.release(Key.alt)
+            return True
+        except Exception:
+            return False
+
+    close_match = re.search(r"\b(close|quit|exit)\s+(.+)$", t)
+    if close_match:
+        app = close_match.group(2).strip()
+        if _close_app(app):
+            return True
 
     open_match = re.search(r"\b(open|launch|start)\s+(.+)$", t)
     if open_match:

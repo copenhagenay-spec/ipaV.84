@@ -21,7 +21,7 @@ import ui
 import wizard
 
 from app import MissingDependencyError, transcribe_mic, transcribe_mic_hold
-from config import load_config, save_config
+from config import load_config, save_config, discover_apps
 from skills import handle_transcript
 from steam import find_steam_apps
 
@@ -231,6 +231,10 @@ def main() -> None:
         cfg["wizard_done"] = True
         save_config(cfg)
 
+    if cfg:
+        if discover_apps(cfg):
+            save_config(cfg)
+
     try:
         import ctypes  # type: ignore
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("IPA.Assistant")
@@ -423,7 +427,7 @@ def main() -> None:
         return tuple(parts)
 
     def _fetch_latest_version() -> str | None:
-        url = "https://raw.githubusercontent.com/copenhagenay-spec/IPA-alpha/main/ipaV.84/VERSION"
+        url = "https://raw.githubusercontent.com/copenhagenay-spec/IPA-alpha/main/ipaV.85/VERSION"
         with urllib.request.urlopen(url, timeout=10) as resp:
             return resp.read().decode("utf-8").strip()
 
