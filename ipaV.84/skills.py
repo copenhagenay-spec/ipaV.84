@@ -981,20 +981,7 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
             threading.Thread(target=restart_fn, daemon=True).start()
         return True
 
-    # Key binds
-    cfg_early = load_config()
-    keybinds = cfg_early.get("keybinds", [])
-    if isinstance(keybinds, list) and keybinds:
-        norm_t = _normalize_text(t)
-        for kb in keybinds:
-            phrase = str(kb.get("phrase", "")).strip().lower()
-            key = str(kb.get("key", "")).strip()
-            count = int(kb.get("count", 1))
-            if not phrase or not key:
-                continue
-            if _normalize_text(phrase) == norm_t:
-                _press_key(key, count)
-                return True
+    # Key binds (disabled — under development)
 
     # Send message (type + Enter)
     send_match = re.search(r"\bsend\s+message\s+(.+)$", t)
