@@ -1,27 +1,15 @@
 # Changelog
 
-## 0.85.0
-- Close app by voice — "close <app name>" or "close this"
-- Auto-discover common apps on startup (Chrome, Firefox, Edge, Opera GX, Discord, Steam, VLC, OBS, and more)
-- Spotify search by voice — "spotify <query>" or "spotify play <query>"
-- "What can I say" UI overhauled — dark themed, section cards, colored placeholders
-- Help window now opens in background thread — PTT stays active while it's open
-- App list in "What Can I Say" now shows only relevant discovered apps, not full Steam library
-- Open last app again — "open that again"
-- Full documentation added — setup, commands, adding apps, AI setup, Discord setup
-- Key binds (keypress commands) temporarily disabled pending reliability improvements
-- Wizard shortcut creation fixed — no more duplicate Start Menu entries
-
-## 0.84.9.0
-- Switched AI backend to Groq (free, no quota issues) — also auto-detects Claude and OpenAI API keys
-- Added standard English model option in wizard (vosk-model-en-us-0.22-lgraph, ~128MB, better accuracy)
-- Vosk model now cached in memory — no longer reloads on every keypress
-- Add alias voice command — say "add alias [name] for [app]" to create custom app shortcuts
-- PTT audio cues — beep on press signals when to start talking, beep on release confirms end
-- Improved hold-to-talk timing — reduced audio cutoff at start and end of speech
-- Mishear corrections expanded for "restart assistant"
-- Wizard: desktop shortcut creation option added
-- Removed unused VBS launcher
+## 0.84.8.7
+- Personality system — moved all response pools into `personality.py` for cleaner separation
+- Wake acknowledgments — 15 random lines when wake word triggers
+- Command confirmations — per-category response pools (open, close, volume, note, timer, search, send)
+- Social responses — VERA responds to greetings, thanks, compliments, good morning/night, how are you, and more
+- Fallback response — VERA speaks when a command isn't recognized instead of going silent
+- Wake word simplified — trigger with just "vera" instead of requiring "hey vera"
+- Wake word audio fix — mic reuses existing stream so no startup delay on command capture
+- Ready beep — short tone signals mic is open after wake ack
+- Edge TTS — replaced pyttsx3 with Microsoft neural TTS (en-US-JennyNeural) for a much cleaner voice; falls back to pyttsx3 if offline
 
 ## 0.84.8.6
 - UI refactor — improved layout consistency, button styles, card sections, and section headers (thepyro-dev)
@@ -45,7 +33,7 @@
 ## 0.84.8.1
 - AI now injects today's date into the prompt so it knows the current date
 - Switched default Groq model to llama-3.3-70b-versatile (December 2023 cutoff, smarter responses)
-- Added Claude / Anthropic API support — paste a `sk-ant-` key and IPA uses Claude Haiku automatically
+- Added Claude / Anthropic API support — paste a `sk-ant-` key and VERA uses Claude Haiku automatically
 - README note added about AI knowledge cutoff
 
 ## 0.84.8

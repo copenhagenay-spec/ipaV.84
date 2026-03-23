@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import queue
 import subprocess
 import sys
 import traceback
@@ -235,9 +236,23 @@ def main() -> None:
         if discover_apps(cfg):
             save_config(cfg)
 
+    def _startup_update_check():
+        try:
+            local = open(os.path.join(os.path.dirname(__file__), "VERSION")).read().strip()
+            url = "https://raw.githubusercontent.com/copenhagenay-spec/IPA-alpha/main/ipaV.85/VERSION"
+            with urllib.request.urlopen(url, timeout=8) as r:
+                remote = r.read().decode().strip()
+            if remote != local:
+                import tkinter.messagebox as _mb
+                _mb.showinfo("Update Available", f"A new version of VERA is available ({remote}).\n\nOpen VERA and click Check Updates to install.")
+        except Exception:
+            pass
+
+    threading.Thread(target=_startup_update_check, daemon=True).start()
+
     try:
         import ctypes  # type: ignore
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("IPA.Assistant")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("VERA.Assistant")
     except Exception:
         pass
 
@@ -250,7 +265,7 @@ def main() -> None:
     ctk.set_appearance_mode("dark" if is_dark else "light")
 
     root = ctk.CTk()
-    root.title("IPA Assistant")
+    root.title("VERA")
     root.geometry("620x560")
     root.minsize(580, 460)
     root.resizable(True, True)
@@ -398,6 +413,7 @@ def main() -> None:
 
     def _do_restart():
         try:
+            save_config(_build_config())
             listener.stop()
             if tray_icon["icon"] is not None:
                 tray_icon["icon"].stop()
@@ -446,7 +462,7 @@ def main() -> None:
 
     def _apply_update_from_zip(zip_path: str) -> None:
         base_dir = os.path.dirname(__file__)
-        tmp_dir = tempfile.mkdtemp(prefix="ipa_update_")
+        tmp_dir = tempfile.mkdtemp(prefix="vera_update_")
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(tmp_dir)
 
@@ -520,7 +536,7 @@ def main() -> None:
             except Exception:
                 pass
 
-            messagebox.showinfo("Update", "Update installed. Restarting IPA...")
+            messagebox.showinfo("Update", "Update installed. Restarting VERA...")
             script_path = os.path.abspath(__file__)
             subprocess.Popen([sys.executable, script_path])
             root.destroy()
@@ -963,6 +979,9 @@ def main() -> None:
                     restart_fn=_do_restart,
                 )
                 status_var.set(f"Listening (hotkey {hotkey.get()})")
+            elif mode.get() == "wake":
+                _start_wake_word()
+                status_var.set("Wake word active (say 'hey VERA')")
             else:
                 status_var.set("Timed mic mode (manual Run Now)")
         except Exception as exc:
@@ -970,7 +989,102 @@ def main() -> None:
 
     def _stop_background():
         listener.stop()
+        _stop_wake_word()
         status_var.set("Idle")
+
+    # --- Wake Word ---
+    _WAKE_PHRASES = {"vera"}
+    _wake_stop = threading.Event()
+
+    def _wake_word_loop():
+        try:
+            import sounddevice as sd  # type: ignore
+            from vosk import KaldiRecognizer  # type: ignore
+            from app import _resolve_model_path, _model_cache
+            import json as _json
+
+            model_path = _model_dir()
+            resolved = _resolve_model_path(model_path)
+            if resolved not in _model_cache:
+                from vosk import Model  # type: ignore
+                _model_cache[resolved] = Model(resolved)
+            model = _model_cache[resolved]
+
+            samplerate = 16000
+            rec = KaldiRecognizer(model, samplerate)
+            q: queue.Queue = queue.Queue()
+
+            def _cb(indata, frames, time_info, status):
+                q.put(bytes(indata))
+
+            with sd.RawInputStream(samplerate=samplerate, blocksize=4000, dtype="int16", channels=1, callback=_cb):
+                while not _wake_stop.is_set():
+                    try:
+                        data = q.get(timeout=0.5)
+                    except Exception:
+                        continue
+                    triggered = False
+                    if rec.AcceptWaveform(data):
+                        text = _json.loads(rec.Result()).get("text", "").lower()
+                        if any(p in text for p in _WAKE_PHRASES):
+                            triggered = True
+                    else:
+                        text = _json.loads(rec.PartialResult()).get("partial", "").lower()
+                        if any(p in text for p in _WAKE_PHRASES):
+                            triggered = True
+                            rec = KaldiRecognizer(model, samplerate)
+
+                    if triggered and not _wake_stop.is_set():
+                        from personality import get_wake_ack  # type: ignore
+                        from skills import _edge_tts_play  # type: ignore
+                        _edge_tts_play(get_wake_ack())  # blocks until done
+                        # Flush audio captured during TTS playback
+                        while not q.empty():
+                            try:
+                                q.get_nowait()
+                            except Exception:
+                                break
+                        # Beep to signal mic is open and ready
+                        import winsound as _winsound
+                        _winsound.Beep(880, 150)
+                        # Record command using the already-running stream
+                        cmd_rec = KaldiRecognizer(model, samplerate)
+                        cmd_parts = []
+                        cmd_end = time.time() + 5
+                        while time.time() < cmd_end:
+                            try:
+                                data = q.get(timeout=0.5)
+                            except Exception:
+                                continue
+                            if cmd_rec.AcceptWaveform(data):
+                                res = _json.loads(cmd_rec.Result())
+                                if res.get("text"):
+                                    cmd_parts.append(res["text"])
+                        final = _json.loads(cmd_rec.FinalResult())
+                        if final.get("text"):
+                            cmd_parts.append(final["text"])
+                        command = " ".join(cmd_parts).strip()
+                        if command:
+                            root.after(0, lambda t=command: _update_transcript(t))
+                            handle_transcript(command, allow_prompt=True, confirm_fn=_confirm_prompt, restart_fn=_do_restart)
+                        rec = KaldiRecognizer(model, samplerate)
+        except Exception as exc:
+            print(f"Wake word error: {exc}")
+
+    def _start_wake_word():
+        _wake_stop.clear()
+        threading.Thread(target=_wake_word_loop, daemon=True).start()
+
+    def _stop_wake_word():
+        _wake_stop.set()
+
+    def _toggle_wake_word():
+        if mode.get() == "wake":
+            listener.stop()
+            _start_wake_word()
+            status_var.set("Wake word active (say 'hey VERA')")
+        else:
+            _stop_wake_word()
 
     # --- Setup Wizard ---
     def _run_wizard():
@@ -1029,6 +1143,7 @@ def main() -> None:
             root.after(0, root.withdraw)
 
         def _exit_app(_=None):
+            save_config(_build_config())
             listener.stop()
             if tray_icon["icon"] is not None:
                 tray_icon["icon"].stop()
@@ -1036,6 +1151,7 @@ def main() -> None:
 
         def _restart_app(_=None):
             try:
+                save_config(_build_config())
                 listener.stop()
                 if tray_icon["icon"] is not None:
                     tray_icon["icon"].stop()
@@ -1054,7 +1170,7 @@ def main() -> None:
             pystray.MenuItem("Exit", _exit_app),
         )
 
-        icon = pystray.Icon("ipa-assistant", _make_image(), "IPA Assistant", menu)
+        icon = pystray.Icon("vera", _make_image(), "VERA", menu)
         return icon
 
     def _start_tray():
@@ -1148,6 +1264,24 @@ def main() -> None:
             except Exception:
                 pass
 
+    def _export_transcripts():
+        src = os.path.join(os.path.dirname(__file__), "data", "logs", "transcripts.log")
+        if not os.path.exists(src):
+            messagebox.showinfo("Export Transcripts", "No transcript log found yet.")
+            return
+        from tkinter import filedialog
+        dest = filedialog.asksaveasfilename(
+            defaultextension=".log",
+            filetypes=[("Log files", "*.log"), ("Text files", "*.txt"), ("All files", "*.*")],
+            initialfile="transcripts.log",
+            title="Export Transcripts",
+        )
+        if not dest:
+            return
+        import shutil
+        shutil.copy2(src, dest)
+        messagebox.showinfo("Export Transcripts", f"Saved to:\n{dest}")
+
     def _clear_pycache():
         base_dir = os.path.dirname(__file__)
         removed = 0
@@ -1209,6 +1343,8 @@ def main() -> None:
         "stop_background": _stop_background,
         "check_for_updates": _check_for_updates,
         "create_bug_report": _create_bug_report,
+        "export_transcripts": _export_transcripts,
+        "toggle_wake_word": _toggle_wake_word,
         "clear_pycache": _clear_pycache,
         "add_app": _add_app,
         "remove_app": _remove_app,

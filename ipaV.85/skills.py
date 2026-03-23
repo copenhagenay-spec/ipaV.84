@@ -10,9 +10,9 @@ import os
 from urllib.parse import quote_plus
 import subprocess
 import webbrowser
-from urllib.parse import quote_plus
 
 from config import load_config
+from personality import get_confirm, handle_social, get_fallback
 
 
 def _confirm(prompt: str, allow_prompt: bool, confirm_fn=None) -> bool:
@@ -92,22 +92,78 @@ def _open_notes() -> bool:
         _log_event(f"NOTES_OPEN_FAILED: {exc}")
         return False
 
+_VERA_VOICE = "en-US-JennyNeural"
+
+
+def _edge_tts_play(text: str) -> None:
+    """Generate audio via Edge TTS and play it synchronously. Falls back to pyttsx3."""
+    try:
+        import asyncio
+        import tempfile
+        import edge_tts  # type: ignore
+        from playsound import playsound  # type: ignore
+
+        async def _generate():
+            communicate = edge_tts.Communicate(text, _VERA_VOICE)
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+                tmp = f.name
+            await communicate.save(tmp)
+            return tmp
+
+        tmp_path = asyncio.run(_generate())
+        playsound(tmp_path)
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+    except Exception as e:
+        _log_event(f"TTS_EDGE_ERROR: {e}")
+        # Fallback to pyttsx3
+        try:
+            import pyttsx3  # type: ignore
+            engine = pyttsx3.init()
+            voices = engine.getProperty("voices")
+            female = next((v for v in voices if "zira" in v.name.lower()), None)
+            if female:
+                engine.setProperty("voice", female.id)
+            engine.say(text)
+            engine.runAndWait()
+        except Exception as e2:
+            _log_event(f"TTS_FALLBACK_ERROR: {e2}")
+
+
+def _tts_speak(text: str) -> bool:
+    try:
+        threading.Thread(target=_edge_tts_play, args=(text,), daemon=True).start()
+        _log_event(f"TTS_SPEAK: {text}")
+        return True
+    except Exception as exc:
+        print(f"TTS failed: {exc}")
+        _log_event(f"TTS_FAILED: {exc}")
+        return False
+
+
+def _vera_confirm(category: str = "default") -> None:
+    """Speak a random confirmation line appropriate for the action category."""
+    _tts_speak(get_confirm(category))
+
+
 def _list_notes(limit: int = 5) -> None:
     try:
         path = _notes_path()
         if not os.path.exists(path):
-            print("No notes yet.")
+            _tts_speak("You have no notes saved.")
             _log_event("NOTES_LIST: empty (file missing)")
             return
         with open(path, "r", encoding="utf-8") as f:
             lines = [ln.strip() for ln in f.readlines() if ln.strip()]
         if not lines:
-            print("No notes yet.")
+            _tts_speak("You have no notes saved.")
             _log_event("NOTES_LIST: empty")
             return
-        print("Recent notes:")
-        for note in lines[-limit:]:
-            print(f"- {note}")
+        notes = lines[-limit:]
+        spoken = f"You have {len(notes)} note{'s' if len(notes) != 1 else ''}. " + ". ".join(notes)
+        _tts_speak(spoken)
         _log_event(f"NOTES_LIST: {len(lines)}")
     except Exception as exc:
         print(f"Failed to list notes: {exc}")
@@ -150,6 +206,46 @@ def _clear_notes() -> bool:
         _log_event(f"NOTES_CLEAR_FAILED: {exc}")
         return False
 
+def _get_volume_interface():
+    from ctypes import cast, POINTER
+    import comtypes  # type: ignore
+    from comtypes import CLSCTX_ALL  # type: ignore
+    from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume  # type: ignore
+    comtypes.CoInitialize()
+    device = AudioUtilities.GetSpeakers()
+    # Newer pycaw wraps device in AudioDevice object — unwrap if needed
+    raw = device._dev if hasattr(device, '_dev') else device
+    interface = raw.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+    return cast(interface, POINTER(IAudioEndpointVolume))
+
+
+def _set_volume(level: int) -> bool:
+    try:
+        vol = _get_volume_interface()
+        scalar = max(0.0, min(1.0, level / 100.0))
+        vol.SetMasterVolumeLevelScalar(scalar, None)
+        _log_event(f"VOLUME_SET: {level}%")
+        return True
+    except Exception as exc:
+        print(f"Volume set failed: {exc}")
+        _log_event(f"VOLUME_SET_FAILED: {exc}")
+        return False
+
+
+def _adjust_volume(direction: str, step: int = 10) -> bool:
+    try:
+        vol = _get_volume_interface()
+        current = round(vol.GetMasterVolumeLevelScalar() * 100)
+        new = min(100, current + step) if direction == "up" else max(0, current - step)
+        vol.SetMasterVolumeLevelScalar(new / 100.0, None)
+        _log_event(f"VOLUME_{direction.upper()}: {current}% -> {new}%")
+        return True
+    except Exception as exc:
+        print(f"Volume adjust failed: {exc}")
+        _log_event(f"VOLUME_ADJUST_FAILED: {exc}")
+        return False
+
+
 def _start_timer(seconds: int, label: str) -> None:
     def _alarm():
         try:
@@ -166,7 +262,7 @@ def _start_timer(seconds: int, label: str) -> None:
                 from tkinter import messagebox
                 root = tk.Tk()
                 root.withdraw()
-                messagebox.showinfo("IPA Timer", f"Timer done: {label}")
+                messagebox.showinfo("VERA Timer", f"Timer done: {label}")
                 root.destroy()
             except Exception:
                 print(f"Timer done: {label}")
@@ -196,6 +292,14 @@ _NUM_WORDS = {
     "eighteen": 18,
     "nineteen": 19,
     "twenty": 20,
+    "thirty": 30,
+    "forty": 40,
+    "fifty": 50,
+    "sixty": 60,
+    "seventy": 70,
+    "eighty": 80,
+    "ninety": 90,
+    "hundred": 100,
 }
 
 _ORDINALS = {
@@ -490,6 +594,7 @@ def _add_alias(alias: str, target: str) -> bool:
 
 
 _last_app: dict = {"name": None, "command": None}
+_saved_volume: dict = {"level": None}  # stores volume before mute so unmute can restore it
 
 
 _CLOSE_OVERRIDES = {
@@ -502,21 +607,20 @@ _CLOSE_OVERRIDES = {
     "opera gx": "opera.exe",
     "opera": "opera.exe",
     "notepad": "notepad.exe",
-    "task manager": "taskmgr.exe",
 }
 
 
 def _close_app(app_name: str) -> bool:
     normalized = _normalize_name(app_name)
+    _norm_overrides = {_normalize_name(k): v for k, v in _CLOSE_OVERRIDES.items()}
     candidates = []
 
-    if normalized in _CLOSE_OVERRIDES:
-        candidates.append(_CLOSE_OVERRIDES[normalized])
+    if normalized in _norm_overrides:
+        candidates.append(_norm_overrides[normalized])
     else:
-        # fuzzy match overrides
-        match = difflib.get_close_matches(normalized, list(_CLOSE_OVERRIDES.keys()), n=1, cutoff=0.7)
+        match = difflib.get_close_matches(normalized, list(_norm_overrides.keys()), n=1, cutoff=0.7)
         if match:
-            candidates.append(_CLOSE_OVERRIDES[match[0]])
+            candidates.append(_norm_overrides[match[0]])
 
     # Also try app name directly as exe
     candidates.append(normalized.replace(" ", "") + ".exe")
@@ -525,12 +629,14 @@ def _close_app(app_name: str) -> bool:
         try:
             result = subprocess.run(
                 ["taskkill", "/f", "/im", exe],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
+            _log_event(f"CLOSE_ATTEMPT: {exe} -> rc={result.returncode} err={result.stderr.decode(errors='ignore').strip()}")
             if result.returncode == 0:
                 return True
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_event(f"CLOSE_EXCEPTION: {exe} -> {exc}")
+    _log_event(f"CLOSE_FAILED: {app_name} (candidates={candidates})")
     return False
 
 
@@ -885,7 +991,7 @@ def _ask_ai(question: str) -> bool:
                         "Content-Type": "application/json",
                         "x-api-key": api_key,
                         "anthropic-version": "2023-06-01",
-                        "User-Agent": "IPA-Assistant/1.0",
+                        "User-Agent": "VERA/1.0",
                     },
                     method="POST",
                 )
@@ -910,7 +1016,7 @@ def _ask_ai(question: str) -> bool:
                     headers={
                         "Content-Type": "application/json",
                         "Authorization": f"Bearer {api_key}",
-                        "User-Agent": "IPA-Assistant/1.0",
+                        "User-Agent": "VERA/1.0",
                     },
                     method="POST",
                 )
@@ -936,7 +1042,7 @@ def _ask_ai(question: str) -> bool:
                     headers={
                         "Content-Type": "application/json",
                         "Authorization": f"Bearer {api_key}",
-                        "User-Agent": "IPA-Assistant/1.0",
+                        "User-Agent": "VERA/1.0",
                     },
                     method="POST",
                 )
@@ -969,25 +1075,6 @@ def _ask_ai(question: str) -> bool:
     return True
 
 
-def _tts_speak(text: str) -> bool:
-    try:
-        import pyttsx3  # type: ignore
-        def _run():
-            try:
-                engine = pyttsx3.init()
-                engine.say(text)
-                engine.runAndWait()
-            except Exception as e:
-                _log_event(f"TTS_ERROR: {e}")
-        threading.Thread(target=_run, daemon=True).start()
-        _log_event(f"TTS_SPEAK: {text}")
-        return True
-    except Exception as exc:
-        print(f"TTS failed: {exc}")
-        _log_event(f"TTS_FAILED: {exc}")
-        return False
-
-
 def _discord_read(channel_name: str) -> bool:
     cfg = load_config()
     token = cfg.get("discord_bot_token", "").strip()
@@ -1009,7 +1096,7 @@ def _discord_read(channel_name: str) -> bool:
 
         headers = {
             "Authorization": f"Bot {token}",
-            "User-Agent": "IPA-Assistant/1.0",
+            "User-Agent": "VERA/1.0",
         }
 
         req = urllib.request.Request(
@@ -1093,7 +1180,7 @@ def _discord_send(channel_name: str, message: str) -> bool:
             data=data,
             headers={
                 "Content-Type": "application/json",
-                "User-Agent": "IPA-Assistant/1.0",
+                "User-Agent": "VERA/1.0",
             },
             method="POST",
         )
@@ -1131,7 +1218,7 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
         return True
 
     # Restart IPA
-    if re.search(r"\b(restart|reboot)\s+(ipa|assistant|the assistant)\b", t) or t.strip() in ("restart", "reboot"):
+    if re.search(r"\b(restart|reboot)\s+(vera|assistant|the assistant)\b", t) or t.strip() in ("restart", "reboot"):
         _log_event("RESTART_IPA: voice command")
         if restart_fn is not None:
             threading.Thread(target=restart_fn, daemon=True).start()
@@ -1227,6 +1314,7 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
                 note_text = ""
         if note_text:
             _append_note(note_text)
+            _vera_confirm("note")
         else:
             print("No note text provided.")
             _log_event("NOTE_SKIPPED: no text")
@@ -1262,13 +1350,53 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
             print(f"Failed to sleep: {exc}")
         return True
 
-    # System audio mute/unmute (toggle)
+    # Mute — save current volume then set to 0
     if re.search(
-        r"\b(mute|un\s*mute|toggle mute|mute audio|un\s*mute audio|mute volume|un\s*mute volume|"
-        r"sound off|sound on|audio off|audio on|volume off|volume on|turn sound off|turn sound on)\b",
-        t,
+        r"\b(mute|mute audio|mute volume|sound off|audio off|volume off|turn sound off|turn audio off)\b", t
     ):
-        if _media_key("mute"):
+        try:
+            vol = _get_volume_interface()
+            _saved_volume["level"] = round(vol.GetMasterVolumeLevelScalar() * 100)
+        except Exception:
+            _saved_volume["level"] = 50
+        if _set_volume(0):
+            _vera_confirm("volume")
+            return True
+
+    # Unmute — restore saved volume
+    if re.search(
+        r"\b(un\s*mute|unmute audio|unmute volume|sound on|audio on|volume on|turn sound on|turn audio on)\b", t
+    ):
+        restore = _saved_volume["level"] if _saved_volume["level"] is not None else 50
+        if _set_volume(restore):
+            _saved_volume["level"] = None
+            _vera_confirm("volume")
+            return True
+
+    # Volume control — "set volume fifty" / "set volume 50" / "set volume max"
+    if re.search(r"\bset\s+volume\s+(max|maximum|full)\b", t):
+        if _set_volume(100):
+            _vera_confirm("volume")
+            return True
+
+    vol_set = re.search(r"\bset\s+volume\s+(\d{1,3}|\w+)\b", t)
+    if vol_set:
+        raw = vol_set.group(1)
+        level = int(raw) if raw.isdigit() else _word_to_num(raw)
+        if level is not None:
+            level = max(0, min(100, round(int(level) / 10) * 10))
+            if _set_volume(level):
+                _vera_confirm("volume")
+                return True
+
+    if re.search(r"\bvolume\s+up\b", t):
+        if _adjust_volume("up"):
+            _vera_confirm("volume")
+            return True
+
+    if re.search(r"\bvolume\s+down\b", t):
+        if _adjust_volume("down"):
+            _vera_confirm("volume")
             return True
 
     # YouTube support (lightweight)
@@ -1310,6 +1438,7 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
     timer = _parse_timer(t)
     if timer:
         seconds, label = timer
+        _vera_confirm("timer")
         _start_timer(seconds, label)
         return True
 
@@ -1387,13 +1516,16 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
     close_current = re.search(r"\b(close|quit|exit)\s+(this|current|window)\b", t)
     if close_current:
         try:
-            from pynput.keyboard import Key, Controller as KbController
-            kb = KbController()
-            kb.press(Key.alt)
-            kb.press(Key.f4)
-            kb.release(Key.f4)
-            kb.release(Key.alt)
-            return True
+            import ctypes
+            import ctypes.wintypes
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+            pid = ctypes.wintypes.DWORD()
+            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            result = subprocess.run(
+                ["taskkill", "/f", "/pid", str(pid.value)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            return result.returncode == 0
         except Exception:
             return False
 
@@ -1401,6 +1533,7 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
     if close_match:
         app = close_match.group(2).strip()
         if _close_app(app):
+            _vera_confirm("close")
             return True
 
     open_match = re.search(r"\b(open|launch|start)\s+(.+)$", t)
@@ -1412,7 +1545,10 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
         if " " not in app and difflib.SequenceMatcher(None, app, "youtube").ratio() >= 0.6:
             if _youtube_search(""):
                 return True
-        return _open_app(app, allow_prompt, confirm_fn=confirm_fn)
+        result = _open_app(app, allow_prompt, confirm_fn=confirm_fn)
+        if result:
+            _vera_confirm("open")
+        return result
 
     search_match = re.search(r"\b(search|look up|lookup|find)(\s+(for\s+)?(.+))?$", t)
     if search_match:
@@ -1435,4 +1571,10 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
         query = web_match.group(3).strip()
         return _web_search(query, allow_prompt, confirm_fn=confirm_fn)
 
+    # Social responses
+    if handle_social(t, _tts_speak):
+        return True
+
+    # Fallback — nothing matched
+    _tts_speak(get_fallback())
     return False

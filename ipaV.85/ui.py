@@ -1,4 +1,4 @@
-"""Main UI layout for IPA (CustomTkinter)."""
+"""Main UI layout for VERA (CustomTkinter)."""
 
 from __future__ import annotations
 
@@ -152,6 +152,7 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     _stop_background = callbacks["stop_background"]
     _check_for_updates = callbacks["check_for_updates"]
     _create_bug_report = callbacks["create_bug_report"]
+    _export_transcripts = callbacks["export_transcripts"]
     _clear_pycache = callbacks["clear_pycache"]
     _add_app = callbacks["add_app"]
     _remove_app = callbacks["remove_app"]
@@ -193,7 +194,7 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     # -- Logo --
     logo_img = _load_logo()
     if logo_img is not None:
-        logo_label = ctk.CTkLabel(home_scroll, image=logo_img, text="")
+        logo_label = ctk.CTkLabel(home_scroll, image=logo_img, text="", bg_color="transparent")
         logo_label.pack(pady=(10, 6))
 
     # -- Primary Controls (swap based on mode) --
@@ -217,6 +218,9 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
         if current == "mic":
             bg_ctrl_row.pack_forget()
             mic_ctrl_row.pack(fill="x", padx=PAD_CARD, pady=4)
+        elif current == "wake":
+            bg_ctrl_row.pack_forget()
+            mic_ctrl_row.pack_forget()
         else:
             mic_ctrl_row.pack_forget()
             bg_ctrl_row.pack(fill="x", padx=PAD_CARD, pady=4)
@@ -245,7 +249,7 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
 
     # -- Listening Mode --
     _section_header(settings_scroll, "Listening Mode",
-                    "Choose how IPA listens for your voice commands.")
+                    "Choose how VERA listens for your voice commands.")
     mode_card = _card(settings_scroll)
 
     mode_row = _card_row(mode_card)
@@ -254,7 +258,10 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     ctk.CTkRadioButton(mode_row, text="Hold-to-talk", variable=mode,
                        value="hold").pack(side="left", padx=(0, 16))
     ctk.CTkRadioButton(mode_row, text="Hotkey", variable=mode,
-                       value="hotkey").pack(side="left")
+                       value="hotkey").pack(side="left", padx=(0, 16))
+    ctk.CTkRadioButton(mode_row, text="Wake word", variable=mode,
+                       value="wake",
+                       command=callbacks["toggle_wake_word"]).pack(side="left")
 
     # -- Recording Settings --
     _section_header(settings_scroll, "Recording Settings",
@@ -332,6 +339,8 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     util_row2 = _card_row(util_card)
     _muted_btn(util_row2, text="Bug Report", command=_create_bug_report,
                width=130).pack(side="left", padx=4)
+    _muted_btn(util_row2, text="Export Transcripts", command=_export_transcripts,
+               width=150).pack(side="left", padx=4)
     _danger_btn(util_row2, text="Delete Cache", command=_clear_pycache,
                 width=130).pack(side="left", padx=4)
 
