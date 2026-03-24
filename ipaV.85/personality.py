@@ -433,6 +433,15 @@ def get_fallback() -> str:
     return random.choice(_FALLBACK_RESPONSES)
 
 
+def _get_name() -> str:
+    """Return the user's name from memory if known, else empty string."""
+    try:
+        from memory import recall as _recall
+        return _recall("name") or ""
+    except Exception:
+        return ""
+
+
 def handle_social(transcript: str, speak_fn) -> bool:
     """
     Check transcript against social patterns and speak a response.
@@ -440,8 +449,19 @@ def handle_social(transcript: str, speak_fn) -> bool:
     speak_fn should be a callable that takes a string and speaks it.
     """
     t = transcript.lower()
+    name = _get_name()
     for pattern, pool in _SOCIAL_PATTERNS:
         if re.search(pattern, t):
-            speak_fn(random.choice(pool))
+            response = random.choice(pool)
+            # Inject name into greeting/morning responses if known
+            if name and re.search(r"\b(good morning|morning|hey|hello|what's up)\b", t):
+                greetings_with_name = [
+                    f"Hey {name}, what's up",
+                    f"Morning {name}, hope you slept good",
+                    f"Hey {name}",
+                    f"What's up {name}",
+                ]
+                response = random.choice(greetings_with_name)
+            speak_fn(response)
             return True
     return False

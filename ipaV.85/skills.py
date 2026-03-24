@@ -477,6 +477,8 @@ def _youtube_search(query: str) -> bool:
 
 
 _MISHEAR_MAP = {
+    # medal variants
+    "close metal": "close medal",
     # youtube variants
     "of a new job": "open youtube",
     "oh finish your job": "open youtube",
@@ -547,6 +549,32 @@ def _apply_mishear_corrections(text: str) -> str:
         if not replaced:
             result.append(word)
     return " ".join(result)
+
+
+_FILLER_WORDS = re.compile(
+    r"\b(um+|uh+|hmm+|hm+|like|you know|i mean|so|well|actually|basically|literally|right)\b"
+)
+
+_LEADING_NOISE = re.compile(r"^(the|a|an|i|hey|so|well|okay|ok)\s+")
+_TRAILING_NOISE = re.compile(r"\s+(please|now|for me|for me please)\s*$")
+
+_NOISE_WORDS = {"the", "a", "an", "and", "of", "to", "in", "is", "it", "i", "uh", "um", "hmm"}
+
+
+def preprocess_transcript(text: str) -> str:
+    """Single pipeline that cleans a raw Vosk transcript before command matching."""
+    t = text.strip().lower()
+    # 1. Apply mishear corrections
+    t = _apply_mishear_corrections(t)
+    # 2. Strip filler words
+    t = _FILLER_WORDS.sub("", t)
+    # 3. Collapse extra whitespace
+    t = re.sub(r"\s+", " ", t).strip()
+    # 4. Strip leading noise words (Vosk artifact + natural speech patterns)
+    t = _LEADING_NOISE.sub("", t).strip()
+    # 5. Strip trailing polite words that add no meaning
+    t = _TRAILING_NOISE.sub("", t).strip()
+    return t
 
 
 def _normalize_text(value: str) -> str:
@@ -1275,460 +1303,634 @@ def _discord_send(channel_name: str, message: str) -> bool:
         return False
 
 
-def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, restart_fn=None) -> bool:
-    """
-    Try to match transcript to skills.
-    Returns True if a skill handled it.
-    """
-    _log_transcript(text)
-    t = _apply_mishear_corrections(text.strip().lower())
-    if not t:
+# ---------------------------------------------------------------------------
+# Intent Router
+# ---------------------------------------------------------------------------
+# Each command handler is registered with a priority and a trigger pattern.
+# handle_transcript iterates handlers in descending priority order and calls
+# the first handler whose pattern matches the cleaned transcript.
+# Handlers return True to claim the transcript, False to pass to the next.
+
+_INTENT_REGISTRY: list = []  # list of (priority, compiled_pattern, handler_fn)
+
+
+def _intent(priority: int, pattern: str):
+    """Decorator that registers an intent handler at the given priority."""
+    def decorator(fn):
+        _INTENT_REGISTRY.append((priority, re.compile(pattern), fn))
+        return fn
+    return decorator
+
+
+# --- Help ---
+@_intent(1000, r"\b(what can i say|show commands|show help|list commands)\b")
+def _ih_help(m, t, allow_prompt, confirm_fn, restart_fn):
+    threading.Thread(target=_show_help, daemon=True).start()
+    return True
+
+
+# --- Restart VERA ---
+@_intent(990, r"(\b(restart|reboot)\s+(vera|assistant|the assistant)\b|^(restart|reboot)$)")
+def _ih_restart_vera(m, t, allow_prompt, confirm_fn, restart_fn):
+    _log_event("RESTART_IPA: voice command")
+    if restart_fn is not None:
+        threading.Thread(target=restart_fn, daemon=True).start()
+    return True
+
+
+# --- Keybinds (exact phrase match) ---
+@_intent(980, r"^.+$")
+def _ih_keybinds(m, t, allow_prompt, confirm_fn, restart_fn):
+    cfg = load_config()
+    keybinds = cfg.get("keybinds", [])
+    if not isinstance(keybinds, list) or not keybinds:
         return False
-
-    # Filter Vosk noise artifacts — short meaningless outputs that aren't real commands
-    _NOISE_WORDS = {"the", "a", "an", "and", "of", "to", "in", "is", "it", "i"}
-    if t in _NOISE_WORDS:
-        return False
-
-    # Strip leading "the" Vosk artifact (e.g. "the new villager" → "new villager")
-    if t.startswith("the "):
-        t = t[4:]
-
-    # Help
-    if re.search(r"\b(what can i say|show commands|show help|list commands)\b", t):
-        threading.Thread(target=_show_help, daemon=True).start()
-        return True
-
-    # Restart IPA
-    if re.search(r"\b(restart|reboot)\s+(vera|assistant|the assistant)\b", t) or t.strip() in ("restart", "reboot"):
-        _log_event("RESTART_IPA: voice command")
-        if restart_fn is not None:
-            threading.Thread(target=restart_fn, daemon=True).start()
-        return True
-
-    # Key binds
-    cfg_early = load_config()
-    keybinds = cfg_early.get("keybinds", [])
-    if isinstance(keybinds, list) and keybinds:
-        norm_t = _normalize_text(t)
-        for kb in keybinds:
-            phrase = str(kb.get("phrase", "")).strip().lower()
-            key = str(kb.get("key", "")).strip()
-            count = int(kb.get("count", 1))
-            if not phrase or not key:
-                continue
-            if _normalize_text(phrase) == norm_t:
-                _run_macro(key, count)
-                return True
-
-    # Send message (type + Enter)
-    send_match = re.search(r"\bsend\s+message\s+(.+)$", t)
-    if send_match:
-        _send_message(send_match.group(1).strip())
-        return True
-
-    # Ask AI
-    ask_match = re.search(r"^ask\s+(.+)$", t)
-    if ask_match:
-        _ask_ai(ask_match.group(1).strip())
-        return True
-
-    # Type text
-    type_match = re.search(r"\btype\s+(.+)$", t)
-    if type_match:
-        text_to_type = type_match.group(1).strip()
-        _type_text(text_to_type)
-        return True
-
-    # TTS
-    say_match = re.search(r"\bread\s+out\s+(.+)$", t)
-    if say_match:
-        _tts_speak(say_match.group(1).strip())
-        return True
-
-    # Discord read
-    discord_read_match = re.search(r"\bread\s+discord\s+(\w+)\b", t)
-    if discord_read_match:
-        threading.Thread(target=_discord_read, args=(discord_read_match.group(1).strip(),), daemon=True).start()
-        return True
-
-    # Discord send
-    discord_match = re.search(r"\bdiscord\s+(\w+)\s+(.+)$", t)
-    if discord_match:
-        channel = discord_match.group(1).strip()
-        msg = discord_match.group(2).strip()
-        _discord_send(channel, msg)
-        return True
-
-    # Notes
-    if re.search(r"\b(clear|delete|remove)\s+(all\s+)?notes\b", t):
-        if confirm_fn and not confirm_fn("Clear all notes?"):
+    norm_t = _normalize_text(t)
+    for kb in keybinds:
+        phrase = str(kb.get("phrase", "")).strip().lower()
+        key = str(kb.get("key", "")).strip()
+        count = int(kb.get("count", 1))
+        if not phrase or not key:
+            continue
+        if _normalize_text(phrase) == norm_t:
+            _run_macro(key, count)
             return True
-        _clear_notes()
-        return True
+    return False
 
-    if re.search(r"\b(open|show)\s+notes?\b", t):
-        _open_notes()
-        return True
 
-    if re.search(r"\b(list|show)\s+notes\b", t):
-        _list_notes()
-        return True
+# --- Send message ---
+@_intent(850, r"\bsend\s+message\s+(.+)$")
+def _ih_send_message(m, t, allow_prompt, confirm_fn, restart_fn):
+    _send_message(m.group(1).strip())
+    return True
 
-    if re.search(r"\b(delete|remove|undo)\s+(last\s+)?note\b", t):
-        if confirm_fn and not confirm_fn("Delete last note?"):
-            return True
-        _delete_last_note()
-        return True
 
-    note_match = re.search(r"\b(note|notes|take a note|add note|remember)\b\s*(.+)?$", t)
-    if note_match:
-        note_text = (note_match.group(2) or "").strip()
-        if not note_text:
-            # Fallback: take everything after the first word "note/notes"
-            parts = t.split(" ", 1)
-            if len(parts) == 2:
-                note_text = parts[1].strip()
-        if not note_text and allow_prompt:
-            try:
-                note_text = input("Note: ").strip()
-            except Exception:
-                note_text = ""
-        if note_text:
-            _append_note(note_text)
-            _vera_confirm("note")
-        else:
-            print("No note text provided.")
-            _log_event("NOTE_SKIPPED: no text")
-        return True
+# --- Ask AI ---
+@_intent(840, r"^ask\s+(.+)$")
+def _ih_ask_ai(m, t, allow_prompt, confirm_fn, restart_fn):
+    _ask_ai(m.group(1).strip())
+    return True
 
-    # Restart PC
-    if re.search(r"\b(restart (the )?(pc|computer)|reboot (the )?(pc|computer))\b", t):
-        if confirm_fn and not confirm_fn("Restart the computer?"):
-            return True
+
+# --- Memory: set name ---
+@_intent(880, r"\bmy\s+name\s+is\s+(.+)$")
+def _ih_set_name(m, t, allow_prompt, confirm_fn, restart_fn):
+    from memory import remember as _remember
+    name = m.group(1).strip().title()
+    _remember("name", name)
+    _tts_speak(f"Got it, I'll remember that. Nice to meet you, {name}")
+    return True
+
+
+# --- Memory: ask name ---
+@_intent(879, r"\b(what is my name|do you know my name|what('s| is) my name)\b")
+def _ih_ask_name(m, t, allow_prompt, confirm_fn, restart_fn):
+    from memory import recall as _recall
+    name = _recall("name")
+    if name:
+        _tts_speak(f"Your name is {name}")
+    else:
+        _tts_speak("I don't know your name yet. Tell me with 'my name is'")
+    return True
+
+
+# --- Memory: remember fact ---
+@_intent(875, r"\b(remember|vera remember|don't forget)\s+(?:that\s+)?(.+)$")
+def _ih_remember(m, t, allow_prompt, confirm_fn, restart_fn):
+    from memory import remember as _remember
+    fact = m.group(2).strip()
+    # Try to parse "my X is Y" style facts
+    name_match = re.match(r"my\s+(\w+)\s+is\s+(.+)$", fact)
+    if name_match:
+        key = f"my_{name_match.group(1).lower()}"
+        value = name_match.group(2).strip()
+        _remember(key, value)
+        _tts_speak(f"Got it, remembered that your {name_match.group(1)} is {value}")
+    else:
+        _remember(f"fact_{len(fact)}", fact)
+        _tts_speak("Got it, I'll remember that")
+    return True
+
+
+# --- Memory: forget ---
+@_intent(874, r"\b(forget|vera forget)\s+(?:my\s+)?(.+)$")
+def _ih_forget(m, t, allow_prompt, confirm_fn, restart_fn):
+    from memory import forget as _forget
+    key = m.group(2).strip().lower()
+    if _forget(key) or _forget(f"my_{key}"):
+        _tts_speak(f"Done, I've forgotten that")
+    else:
+        _tts_speak("I don't have anything stored for that")
+    return True
+
+
+# --- Memory: what do you know ---
+@_intent(873, r"\b(what do you know about me|what do you remember|what have you remembered)\b")
+def _ih_recall_all(m, t, allow_prompt, confirm_fn, restart_fn):
+    from memory import recall_all as _recall_all
+    data = _recall_all()
+    if not data:
+        _tts_speak("I don't know anything about you yet")
+        return True
+    parts = []
+    for key, value in data.items():
+        parts.append(f"{key.replace('_', ' ')}: {value}")
+    _tts_speak("Here's what I know. " + ", ".join(parts))
+    return True
+
+
+# --- Type text ---
+@_intent(830, r"\btype\s+(.+)$")
+def _ih_type(m, t, allow_prompt, confirm_fn, restart_fn):
+    _type_text(m.group(1).strip())
+    return True
+
+
+# --- Read out (TTS) ---
+@_intent(820, r"\bread\s+out\s+(.+)$")
+def _ih_read_out(m, t, allow_prompt, confirm_fn, restart_fn):
+    _tts_speak(m.group(1).strip())
+    return True
+
+
+# --- Discord read ---
+@_intent(810, r"\bread\s+discord\s+(\w+)\b")
+def _ih_discord_read(m, t, allow_prompt, confirm_fn, restart_fn):
+    threading.Thread(target=_discord_read, args=(m.group(1).strip(),), daemon=True).start()
+    return True
+
+
+# --- Discord send ---
+@_intent(800, r"\bdiscord\s+(\w+)\s+(.+)$")
+def _ih_discord_send(m, t, allow_prompt, confirm_fn, restart_fn):
+    _discord_send(m.group(1).strip(), m.group(2).strip())
+    return True
+
+
+# --- Notes: clear all ---
+@_intent(760, r"\b(clear|delete|remove)\s+(all\s+)?notes\b")
+def _ih_notes_clear_all(m, t, allow_prompt, confirm_fn, restart_fn):
+    if confirm_fn and not confirm_fn("Clear all notes?"):
+        return True
+    _clear_notes()
+    return True
+
+
+# --- Notes: open ---
+@_intent(755, r"\b(open|show)\s+notes?\b")
+def _ih_notes_open(m, t, allow_prompt, confirm_fn, restart_fn):
+    _open_notes()
+    return True
+
+
+# --- Notes: list ---
+@_intent(750, r"\b(list|show)\s+notes\b")
+def _ih_notes_list(m, t, allow_prompt, confirm_fn, restart_fn):
+    _list_notes()
+    return True
+
+
+# --- Notes: delete last ---
+@_intent(745, r"\b(delete|remove|undo)\s+(last\s+)?note\b")
+def _ih_notes_delete_last(m, t, allow_prompt, confirm_fn, restart_fn):
+    if confirm_fn and not confirm_fn("Delete last note?"):
+        return True
+    _delete_last_note()
+    return True
+
+
+# --- Notes: add ---
+@_intent(740, r"\b(note|notes|take a note|add note|remember)\b\s*(.+)?$")
+def _ih_note_add(m, t, allow_prompt, confirm_fn, restart_fn):
+    note_text = (m.group(2) or "").strip()
+    if not note_text:
+        parts = t.split(" ", 1)
+        if len(parts) == 2:
+            note_text = parts[1].strip()
+    if not note_text and allow_prompt:
         try:
-            _run_command("shutdown /r /t 5")
-        except Exception as exc:
-            _log_event(f"RESTART_PC_FAILED: {exc}")
-        return True
-
-    # Shutdown PC
-    if re.search(r"\b(shut down|shutdown|turn off|power off) (the )?(pc|computer)\b", t):
-        if confirm_fn and not confirm_fn("Shut down the computer?"):
-            return True
-        try:
-            _run_command("shutdown /s /t 5")
-        except Exception as exc:
-            _log_event(f"SHUTDOWN_PC_FAILED: {exc}")
-        return True
-
-    # Sleep command (Windows)
-    if re.search(r"\b(sleep|sleep computer|sleep pc|go to sleep|put (the )?(pc|computer) to sleep)\b", t):
-        if confirm_fn and not confirm_fn("Put the computer to sleep?"):
-            return True
-        try:
-            _run_command("rundll32.exe powrprof.dll,SetSuspendState 0,1,0")
-        except Exception as exc:
-            print(f"Failed to sleep: {exc}")
-        return True
-
-    # Mute — save current volume then set to 0
-    if re.search(
-        r"\b(mute|mute audio|mute volume|sound off|audio off|volume off|turn sound off|turn audio off)\b", t
-    ):
-        try:
-            vol = _get_volume_interface()
-            _saved_volume["level"] = round(vol.GetMasterVolumeLevelScalar() * 100)
+            note_text = input("Note: ").strip()
         except Exception:
-            _saved_volume["level"] = 50
-        if _set_volume(0):
-            _vera_confirm("volume")
-            return True
+            note_text = ""
+    if note_text:
+        _append_note(note_text)
+        _vera_confirm("note")
+    else:
+        print("No note text provided.")
+        _log_event("NOTE_SKIPPED: no text")
+    return True
 
-    # Unmute — restore saved volume
-    if re.search(
-        r"\b(un\s*mute|unmute audio|unmute volume|sound on|audio on|volume on|turn sound on|turn audio on)\b", t
-    ):
-        restore = _saved_volume["level"] if _saved_volume["level"] is not None else 50
-        if _set_volume(restore):
-            _saved_volume["level"] = None
-            _vera_confirm("volume")
-            return True
 
-    # Volume control — "set volume fifty" / "set volume 50" / "set volume max"
-    if re.search(r"\bset\s+volume\s+(max|maximum|full)\b", t):
-        if _set_volume(100):
-            _vera_confirm("volume")
-            return True
-
-    vol_set = re.search(r"\bset\s+volume\s+(\d{1,3}|\w+)\b", t)
-    if vol_set:
-        raw = vol_set.group(1)
-        level = int(raw) if raw.isdigit() else _word_to_num(raw)
-        if level is not None:
-            level = max(0, min(100, round(int(level) / 10) * 10))
-            if _set_volume(level):
-                _vera_confirm("volume")
-                return True
-
-    if re.search(r"\bvolume\s+up\b", t):
-        if _adjust_volume("up"):
-            _vera_confirm("volume")
-            return True
-
-    if re.search(r"\bvolume\s+down\b", t):
-        if _adjust_volume("down"):
-            _vera_confirm("volume")
-            return True
-
-    # YouTube support (lightweight)
-    yt_open = re.search(r"\b(open|start|launch)\s+(you\s*tube|youtube|yt)\b", t)
-    if yt_open:
-        if _youtube_search(""):
-            return True
-
-    yt_match = re.search(r"\b(youtube|yt)\s+(.+)$", t)
-    if yt_match:
-        query = yt_match.group(2).strip()
-        # "youtube play <song>" → strip "play" prefix and search
-        play_search = re.match(r"^play\s+(.+)$", query)
-        if play_search:
-            query = play_search.group(1).strip()
-        if query in ("open", "home"):
-            return _youtube_search("")
-        if query not in ("play", "pause", "next", "skip", "previous", "back"):
-            if _youtube_search(query):
-                return True
-
-    if "youtube" in t or re.search(r"\byt\b", t):
-        for word, action in (
-            ("next", "next"),
-            ("skip", "next"),
-            ("previous", "previous"),
-            ("back", "previous"),
-            ("play", "play_pause"),
-            ("pause", "play_pause"),
-        ):
-            if word in t:
-                if _media_key(action):
-                    return True
-
-    if re.search(r"\b(pause|play)\s+(video|vid)\b", t):
-        if _media_key("play_pause"):
-            return True
-
-    if re.search(r"\b(cancel timer|stop timer|never mind|nevermind|forget it|cancel that)\b", t):
-        count = _cancel_all_timers()
-        if count > 0:
-            _tts_speak("Timer cancelled" if count == 1 else f"{count} timers cancelled")
-        else:
-            _tts_speak("No timers running")
+# --- Restart PC ---
+@_intent(720, r"\b(restart (the )?(pc|computer)|reboot (the )?(pc|computer))\b")
+def _ih_restart_pc(m, t, allow_prompt, confirm_fn, restart_fn):
+    if confirm_fn and not confirm_fn("Restart the computer?"):
         return True
+    try:
+        _run_command("shutdown /r /t 5")
+    except Exception as exc:
+        _log_event(f"RESTART_PC_FAILED: {exc}")
+    return True
 
+
+# --- Shutdown PC ---
+@_intent(710, r"\b(shut down|shutdown|turn off|power off) (the )?(pc|computer)\b")
+def _ih_shutdown_pc(m, t, allow_prompt, confirm_fn, restart_fn):
+    if confirm_fn and not confirm_fn("Shut down the computer?"):
+        return True
+    try:
+        _run_command("shutdown /s /t 5")
+    except Exception as exc:
+        _log_event(f"SHUTDOWN_PC_FAILED: {exc}")
+    return True
+
+
+# --- Sleep PC ---
+@_intent(700, r"\b(sleep|sleep computer|sleep pc|go to sleep|put (the )?(pc|computer) to sleep)\b")
+def _ih_sleep_pc(m, t, allow_prompt, confirm_fn, restart_fn):
+    if confirm_fn and not confirm_fn("Put the computer to sleep?"):
+        return True
+    try:
+        _run_command("rundll32.exe powrprof.dll,SetSuspendState 0,1,0")
+    except Exception as exc:
+        print(f"Failed to sleep: {exc}")
+    return True
+
+
+# --- Mute ---
+@_intent(660, r"\b(mute|mute audio|mute volume|sound off|audio off|volume off|turn sound off|turn audio off)\b")
+def _ih_mute(m, t, allow_prompt, confirm_fn, restart_fn):
+    try:
+        vol = _get_volume_interface()
+        _saved_volume["level"] = round(vol.GetMasterVolumeLevelScalar() * 100)
+    except Exception:
+        _saved_volume["level"] = 50
+    if _set_volume(0):
+        _vera_confirm("volume")
+        return True
+    return False
+
+
+# --- Unmute ---
+@_intent(655, r"\b(un\s*mute|unmute audio|unmute volume|sound on|audio on|volume on|turn sound on|turn audio on)\b")
+def _ih_unmute(m, t, allow_prompt, confirm_fn, restart_fn):
+    restore = _saved_volume["level"] if _saved_volume["level"] is not None else 50
+    if _set_volume(restore):
+        _saved_volume["level"] = None
+        _vera_confirm("volume")
+        return True
+    return False
+
+
+# --- Volume max ---
+@_intent(650, r"\bset\s+volume\s+(max|maximum|full)\b")
+def _ih_volume_max(m, t, allow_prompt, confirm_fn, restart_fn):
+    if _set_volume(100):
+        _vera_confirm("volume")
+        return True
+    return False
+
+
+# --- Volume set ---
+@_intent(645, r"\bset\s+volume\s+(\d{1,3}|\w+)\b")
+def _ih_volume_set(m, t, allow_prompt, confirm_fn, restart_fn):
+    raw = m.group(1)
+    level = int(raw) if raw.isdigit() else _word_to_num(raw)
+    if level is not None:
+        level = max(0, min(100, round(int(level) / 10) * 10))
+        if _set_volume(level):
+            _vera_confirm("volume")
+            return True
+    return False
+
+
+# --- Volume up ---
+@_intent(640, r"\bvolume\s+up\b")
+def _ih_volume_up(m, t, allow_prompt, confirm_fn, restart_fn):
+    if _adjust_volume("up"):
+        _vera_confirm("volume")
+        return True
+    return False
+
+
+# --- Volume down ---
+@_intent(635, r"\bvolume\s+down\b")
+def _ih_volume_down(m, t, allow_prompt, confirm_fn, restart_fn):
+    if _adjust_volume("down"):
+        _vera_confirm("volume")
+        return True
+    return False
+
+
+# --- YouTube: open ---
+@_intent(600, r"\b(open|start|launch)\s+(you\s*tube|youtube|yt)\b")
+def _ih_youtube_open(m, t, allow_prompt, confirm_fn, restart_fn):
+    return bool(_youtube_search(""))
+
+
+# --- YouTube: search ---
+@_intent(595, r"\b(youtube|yt)\s+(.+)$")
+def _ih_youtube_search(m, t, allow_prompt, confirm_fn, restart_fn):
+    query = m.group(2).strip()
+    play_search = re.match(r"^play\s+(.+)$", query)
+    if play_search:
+        query = play_search.group(1).strip()
+    if query in ("open", "home"):
+        return bool(_youtube_search(""))
+    if query not in ("play", "pause", "next", "skip", "previous", "back"):
+        if _youtube_search(query):
+            return True
+    return False
+
+
+# --- YouTube: controls ---
+@_intent(590, r"\b(youtube|yt)\b")
+def _ih_youtube_controls(m, t, allow_prompt, confirm_fn, restart_fn):
+    for word, action in (
+        ("next", "next"), ("skip", "next"),
+        ("previous", "previous"), ("back", "previous"),
+        ("play", "play_pause"), ("pause", "play_pause"),
+    ):
+        if word in t:
+            if _media_key(action):
+                return True
+    return False
+
+
+# --- Pause/play video ---
+@_intent(585, r"\b(pause|play)\s+(video|vid)\b")
+def _ih_pause_video(m, t, allow_prompt, confirm_fn, restart_fn):
+    return bool(_media_key("play_pause"))
+
+
+# --- Cancel timer ---
+@_intent(580, r"\b(cancel timer|stop timer|never mind|nevermind|forget it|cancel that)\b")
+def _ih_cancel_timer(m, t, allow_prompt, confirm_fn, restart_fn):
+    count = _cancel_all_timers()
+    if count > 0:
+        _tts_speak("Timer cancelled" if count == 1 else f"{count} timers cancelled")
+    else:
+        _tts_speak("No timers running")
+    return True
+
+
+# --- Set timer ---
+@_intent(575, r"^.+$")
+def _ih_set_timer(m, t, allow_prompt, confirm_fn, restart_fn):
     timer = _parse_timer(t)
     if timer:
         seconds, label = timer
         _vera_confirm("timer")
         _start_timer(seconds, label)
         return True
+    return False
 
-    # Custom actions (phrase -> command)
+
+# --- Custom actions ---
+@_intent(450, r"^.+$")
+def _ih_custom_actions(m, t, allow_prompt, confirm_fn, restart_fn):
     cfg = load_config()
     actions = cfg.get("actions", [])
-    if isinstance(actions, list) and actions:
-        norm_t = _normalize_text(t)
-        for action in actions:
-            if not isinstance(action, dict):
-                continue
-            phrase = str(action.get("phrase", "")).strip().lower()
-            command = str(action.get("command", "")).strip()
-            if not phrase or not command:
-                continue
-            norm_phrase = _normalize_text(phrase)
-            if not norm_phrase:
-                continue
-            # Match exact or prefix to allow "open blue" style phrases
-            if norm_t == norm_phrase or norm_t.startswith(norm_phrase):
+    if not isinstance(actions, list) or not actions:
+        return False
+    norm_t = _normalize_text(t)
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        phrase = str(action.get("phrase", "")).strip().lower()
+        command = str(action.get("command", "")).strip()
+        if not phrase or not command:
+            continue
+        norm_phrase = _normalize_text(phrase)
+        if not norm_phrase:
+            continue
+        if norm_t == norm_phrase or norm_t.startswith(norm_phrase):
+            if not _confirm(f"Run action: {phrase}?", allow_prompt, confirm_fn=confirm_fn):
+                return True
+            _run_command(command)
+            _log_event(f"ACTION_RUN: {phrase} -> {command}")
+            return True
+        tokens = [tok for tok in re.split(r"\s+", t) if tok]
+        if tokens:
+            match = difflib.get_close_matches(phrase, tokens, n=1, cutoff=0.85)
+            if match:
                 if not _confirm(f"Run action: {phrase}?", allow_prompt, confirm_fn=confirm_fn):
                     return True
                 _run_command(command)
                 _log_event(f"ACTION_RUN: {phrase} -> {command}")
                 return True
-            # Fuzzy match against individual tokens for STT hiccups
-            tokens = [tok for tok in re.split(r"\s+", t) if tok]
-            if tokens:
-                match = difflib.get_close_matches(phrase, tokens, n=1, cutoff=0.85)
-                if match:
-                    if not _confirm(f"Run action: {phrase}?", allow_prompt, confirm_fn=confirm_fn):
-                        return True
-                    _run_command(command)
-                    _log_event(f"ACTION_RUN: {phrase} -> {command}")
+    return False
+
+
+# --- Spotify ---
+@_intent(400, r"^.+$")
+def _ih_spotify(m, t, allow_prompt, confirm_fn, restart_fn):
+    cfg = load_config()
+    if not cfg.get("spotify_media", False):
+        return False
+    require_spotify = cfg.get("spotify_requires_keyword", True)
+    keywords = _get_spotify_keywords(cfg)
+    has_spotify = _has_keyword(t, keywords)
+    if not require_spotify or has_spotify:
+        sp_search = re.search(r"\bspotify\s+(?:play\s+|search\s+)?(.+)$", t)
+        if sp_search:
+            query = sp_search.group(1).strip()
+            if query not in ("play", "pause", "next", "skip", "previous", "back", "resume", "stop"):
+                if _spotify_search(query):
                     return True
-
-    if cfg.get("spotify_media", False):
-        require_spotify = cfg.get("spotify_requires_keyword", True)
-        keywords = _get_spotify_keywords(cfg)
-        has_spotify = _has_keyword(t, keywords)
-        if (not require_spotify) or has_spotify:
-            sp_search = re.search(r"\bspotify\s+(?:play\s+|search\s+)?(.+)$", t)
-            if sp_search:
-                query = sp_search.group(1).strip()
-                if query not in ("play", "pause", "next", "skip", "previous", "back", "resume", "stop"):
-                    if _spotify_search(query):
-                        return True
-            action = None
-            if re.search(r"\b(play|pause|resume|stop)(\s+(song|track))?\b", t):
-                action = "play_pause"
-            elif re.search(r"\b(next|skip)(\s+(song|track))?\b", t):
-                action = "next"
-            elif re.search(r"\b(previous|back|rewind)(\s+(song|track))?\b", t):
-                action = "previous"
-            if action:
-                ok = _media_key(action)
-                if ok:
-                    return True
-
-    # Add alias
-    alias_match = re.search(r"\badd alias\s+(.+?)\s+for\s+(.+)$", t)
-    if alias_match:
-        _add_alias(alias_match.group(1).strip(), alias_match.group(2).strip())
-        return True
-
-    if re.search(r"\b(open|launch|start)\s+(that|it)\s+again\b", t):
-        if _last_app["command"]:
-            try:
-                _run_command(_last_app["command"])
+        action = None
+        if re.search(r"\b(play|pause|resume|stop)(\s+(song|track))?\b", t):
+            action = "play_pause"
+        elif re.search(r"\b(next|skip)(\s+(song|track))?\b", t):
+            action = "next"
+        elif re.search(r"\b(previous|back|rewind)(\s+(song|track))?\b", t):
+            action = "previous"
+        if action:
+            if _media_key(action):
                 return True
-            except Exception:
-                pass
+    return False
+
+
+# --- Add alias ---
+@_intent(350, r"\badd alias\s+(.+?)\s+for\s+(.+)$")
+def _ih_add_alias(m, t, allow_prompt, confirm_fn, restart_fn):
+    _add_alias(m.group(1).strip(), m.group(2).strip())
+    return True
+
+
+# --- Open again ---
+@_intent(340, r"\b(open|launch|start)\s+(that|it)\s+again\b")
+def _ih_open_again(m, t, allow_prompt, confirm_fn, restart_fn):
+    if _last_app["command"]:
+        try:
+            _run_command(_last_app["command"])
+            return True
+        except Exception:
+            pass
+    return False
+
+
+# --- Close current window ---
+@_intent(330, r"\b(close|quit|exit)\s+(this|current|window)\b")
+def _ih_close_current(m, t, allow_prompt, confirm_fn, restart_fn):
+    try:
+        import ctypes
+        import ctypes.wintypes
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        pid = ctypes.wintypes.DWORD()
+        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        result = subprocess.run(
+            ["taskkill", "/f", "/pid", str(pid.value)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        return result.returncode == 0
+    except Exception:
         return False
 
-    close_current = re.search(r"\b(close|quit|exit)\s+(this|current|window)\b", t)
-    if close_current:
-        try:
-            import ctypes
-            import ctypes.wintypes
-            hwnd = ctypes.windll.user32.GetForegroundWindow()
-            pid = ctypes.wintypes.DWORD()
-            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-            result = subprocess.run(
-                ["taskkill", "/f", "/pid", str(pid.value)],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
 
-    close_match = re.search(r"\b(close|quit|exit)\s+(.+)$", t)
-    if close_match:
-        app = close_match.group(2).strip()
-        if _close_app(app):
-            _vera_confirm("close")
+# --- Close app ---
+@_intent(320, r"\b(close|quit|exit)\s+(.+)$")
+def _ih_close_app(m, t, allow_prompt, confirm_fn, restart_fn):
+    app = m.group(2).strip()
+    if _close_app(app):
+        _vera_confirm("close")
+        return True
+    return False
+
+
+# --- Open app ---
+@_intent(310, r"\b(open|launch|start)\s+(.+)$")
+def _ih_open_app(m, t, allow_prompt, confirm_fn, restart_fn):
+    app = m.group(2).strip()
+    app = re.sub(r"^the\s+", "", app)
+    if " " not in app and difflib.SequenceMatcher(None, app, "youtube").ratio() >= 0.6:
+        if _youtube_search(""):
             return True
+    result = _open_app(app, allow_prompt, confirm_fn=confirm_fn)
+    if result:
+        _vera_confirm("open")
+    return result
 
-    open_match = re.search(r"\b(open|launch|start)\s+(.+)$", t)
-    if open_match:
-        app = open_match.group(2).strip()
-        # Strip leading "the" inserted by accent mishears (e.g. "open the youtube")
-        app = re.sub(r"^the\s+", "", app)
-        # If app is a single unknown word and fuzzy-matches "youtube", open it
-        if " " not in app and difflib.SequenceMatcher(None, app, "youtube").ratio() >= 0.6:
-            if _youtube_search(""):
-                return True
-        result = _open_app(app, allow_prompt, confirm_fn=confirm_fn)
-        if result:
-            _vera_confirm("open")
-        return result
 
-    search_match = re.search(r"\b(search|look up|lookup|find)(\s+(for\s+)?(.+))?$", t)
-    if search_match:
-        query = (search_match.group(4) or "").strip()
-        # Common mis-hears -> intended search terms
-        if query in ("any may", "anymay", "any maye", "any me", "anyme"):
-            query = "anime"
-        if not query and allow_prompt:
-            try:
-                query = input("Search for: ").strip()
-            except Exception:
-                query = ""
-        if query:
-            return _web_search(query, allow_prompt, confirm_fn=confirm_fn)
-        print("No search query provided.")
-        return True
-
-    web_match = re.search(r"\b(search the web|web search)\s+(for\s+)?(.+)$", t)
-    if web_match:
-        query = web_match.group(3).strip()
+# --- Search ---
+@_intent(300, r"\b(search|look up|lookup|find)(\s+(for\s+)?(.+))?$")
+def _ih_search(m, t, allow_prompt, confirm_fn, restart_fn):
+    query = (m.group(4) or "").strip()
+    if query in ("any may", "anymay", "any maye", "any me", "anyme"):
+        query = "anime"
+    if not query and allow_prompt:
+        try:
+            query = input("Search for: ").strip()
+        except Exception:
+            query = ""
+    if query:
         return _web_search(query, allow_prompt, confirm_fn=confirm_fn)
+    print("No search query provided.")
+    return True
 
-    # Clipboard
-    if re.search(r"\bread\s+clipboard\b", t):
-        try:
-            import tkinter as _tk
-            _r = _tk.Tk()
-            _r.withdraw()
-            text = _r.clipboard_get()
-            _r.destroy()
-            if text.strip():
-                _tts_speak(text.strip())
-            else:
-                _tts_speak("Clipboard is empty")
-        except Exception:
-            _tts_speak("Couldn't read the clipboard")
-        return True
 
-    if re.search(r"\bclear\s+clipboard\b", t):
-        try:
-            import tkinter as _tk
-            _r = _tk.Tk()
-            _r.withdraw()
-            _r.clipboard_clear()
-            _r.clipboard_append("")
-            _r.update()
-            _r.destroy()
-            _vera_confirm("default")
-        except Exception:
-            _tts_speak("Couldn't clear the clipboard")
-        return True
+# --- Web search ---
+@_intent(295, r"\b(search the web|web search)\s+(for\s+)?(.+)$")
+def _ih_web_search(m, t, allow_prompt, confirm_fn, restart_fn):
+    return _web_search(m.group(3).strip(), allow_prompt, confirm_fn=confirm_fn)
 
-    if re.search(r"\b(paste\s+clipboard|paste\s+that|paste\s+it)\b", t):
-        try:
-            from pynput.keyboard import Controller as _KbCtrl, Key as _Key
-            _kb = _KbCtrl()
-            _kb.press(_Key.ctrl)
-            _kb.press('v')
-            _kb.release('v')
-            _kb.release(_Key.ctrl)
-            _vera_confirm("default")
-        except Exception:
-            _tts_speak("Couldn't paste")
-        return True
 
-    copy_match = re.search(r"\bcopy\s+(.+)$", t)
-    if copy_match:
-        text = copy_match.group(1).strip()
-        try:
-            import tkinter as _tk
-            _r = _tk.Tk()
-            _r.withdraw()
-            _r.clipboard_clear()
-            _r.clipboard_append(text)
-            _r.update()
-            _r.destroy()
-            _vera_confirm("default")
-        except Exception:
-            _tts_speak("Couldn't copy that")
-        return True
+# --- Clipboard: read ---
+@_intent(260, r"\bread\s+clipboard\b")
+def _ih_clipboard_read(m, t, allow_prompt, confirm_fn, restart_fn):
+    try:
+        import tkinter as _tk
+        _r = _tk.Tk()
+        _r.withdraw()
+        clip = _r.clipboard_get()
+        _r.destroy()
+        _tts_speak(clip.strip() if clip.strip() else "Clipboard is empty")
+    except Exception:
+        _tts_speak("Couldn't read the clipboard")
+    return True
 
-    # Jokes
-    if re.search(r"\b(tell me a joke|say a joke|give me a joke|tell a joke|make me laugh|joke)\b", t):
-        _tts_speak(get_joke())
-        return True
 
-    # Social responses
+# --- Clipboard: clear ---
+@_intent(255, r"\bclear\s+clipboard\b")
+def _ih_clipboard_clear(m, t, allow_prompt, confirm_fn, restart_fn):
+    try:
+        import tkinter as _tk
+        _r = _tk.Tk()
+        _r.withdraw()
+        _r.clipboard_clear()
+        _r.clipboard_append("")
+        _r.update()
+        _r.destroy()
+        _vera_confirm("default")
+    except Exception:
+        _tts_speak("Couldn't clear the clipboard")
+    return True
+
+
+# --- Clipboard: paste ---
+@_intent(250, r"\b(paste\s+clipboard|paste\s+that|paste\s+it)\b")
+def _ih_clipboard_paste(m, t, allow_prompt, confirm_fn, restart_fn):
+    try:
+        from pynput.keyboard import Controller as _KbCtrl, Key as _Key
+        _kb = _KbCtrl()
+        _kb.press(_Key.ctrl)
+        _kb.press('v')
+        _kb.release('v')
+        _kb.release(_Key.ctrl)
+        _vera_confirm("default")
+    except Exception:
+        _tts_speak("Couldn't paste")
+    return True
+
+
+# --- Clipboard: copy ---
+@_intent(245, r"\bcopy\s+(.+)$")
+def _ih_clipboard_copy(m, t, allow_prompt, confirm_fn, restart_fn):
+    text_to_copy = m.group(1).strip()
+    try:
+        import tkinter as _tk
+        _r = _tk.Tk()
+        _r.withdraw()
+        _r.clipboard_clear()
+        _r.clipboard_append(text_to_copy)
+        _r.update()
+        _r.destroy()
+        _vera_confirm("default")
+    except Exception:
+        _tts_speak("Couldn't copy that")
+    return True
+
+
+# --- Jokes ---
+@_intent(200, r"\b(tell me a joke|say a joke|give me a joke|tell a joke|make me laugh|joke)\b")
+def _ih_joke(m, t, allow_prompt, confirm_fn, restart_fn):
+    _tts_speak(get_joke())
+    return True
+
+
+# Pre-sort the registry once at import time for fast dispatch
+_INTENT_REGISTRY.sort(key=lambda x: -x[0])
+
+
+def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, restart_fn=None) -> bool:
+    """
+    Clean the transcript through preprocess_transcript, then dispatch to the
+    first registered intent handler whose pattern matches. Returns True if a
+    handler claimed the transcript.
+    """
+    _log_transcript(text)
+    t = preprocess_transcript(text)
+    if not t or t in _NOISE_WORDS:
+        return False
+
+    for _priority, pattern, handler in _INTENT_REGISTRY:
+        m = pattern.search(t)
+        if m:
+            if handler(m, t, allow_prompt, confirm_fn, restart_fn):
+                return True
+
     if handle_social(t, _tts_speak):
         return True
 
-    # Fallback — nothing matched
     _tts_speak(get_fallback())
     return False
