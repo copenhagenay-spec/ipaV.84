@@ -566,17 +566,19 @@ _NOISE_WORDS = {"the", "a", "an", "and", "of", "to", "in", "is", "it", "i", "uh"
 
 
 def preprocess_transcript(text: str) -> str:
-    """Single pipeline that cleans a raw Vosk transcript before command matching."""
+    """Single pipeline that cleans a raw transcript before command matching."""
     t = text.strip().lower()
-    # 1. Apply mishear corrections
+    # 1. Strip punctuation (faster-whisper adds commas, periods, question marks)
+    t = re.sub(r"[^\w\s]", "", t)
+    # 2. Apply mishear corrections
     t = _apply_mishear_corrections(t)
-    # 2. Strip filler words
+    # 3. Strip filler words
     t = _FILLER_WORDS.sub("", t)
-    # 3. Collapse extra whitespace
+    # 4. Collapse extra whitespace
     t = re.sub(r"\s+", " ", t).strip()
-    # 4. Strip leading noise words (Vosk artifact + natural speech patterns)
+    # 5. Strip leading noise words
     t = _LEADING_NOISE.sub("", t).strip()
-    # 5. Strip trailing polite words that add no meaning
+    # 6. Strip trailing polite words that add no meaning
     t = _TRAILING_NOISE.sub("", t).strip()
     return t
 
