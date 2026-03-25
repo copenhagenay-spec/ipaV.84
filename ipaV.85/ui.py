@@ -489,8 +489,10 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     _section_header(integ_scroll, "Voice Actions",
                     "Map any spoken phrase to a shell command.")
 
-    actions_textbox = ctk.CTkTextbox(integ_scroll, height=160,
-                                      corner_radius=8)
+    import tkinter as _tk_act
+    actions_textbox = _tk_act.Listbox(integ_scroll, height=6, selectmode="single",
+                                      bg="#2b2b2b", fg="white", selectbackground="#1f538d",
+                                      relief="flat", highlightthickness=0, font=("Segoe UI", 12))
     actions_textbox.pack(fill="x", padx=PAD_OUTER, pady=4)
 
     action_input_card = _card(integ_scroll)
@@ -511,7 +513,7 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     action_btns = _btn_row(integ_scroll)
     _primary_btn(action_btns, text="Add Action", command=_add_action,
                  width=130).pack(side="left", padx=4)
-    _danger_btn(action_btns, text="Remove Last", command=_remove_action,
+    _danger_btn(action_btns, text="Remove Selected", command=_remove_action,
                 width=130).pack(side="right", padx=4)
 
     # -- Key Binds --

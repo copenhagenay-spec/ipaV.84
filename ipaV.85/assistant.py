@@ -778,13 +778,11 @@ def main() -> None:
     def _refresh_actions():
         if actions_textbox is None:
             return
-        actions_textbox.configure(state="normal")
-        actions_textbox.delete("1.0", "end")
+        actions_textbox.delete(0, "end")
         for a in actions:
             phrase = a.get("phrase", "")
             command = a.get("command", "")
-            actions_textbox.insert("end", f"{phrase}  ->  {command}\n")
-        actions_textbox.configure(state="disabled")
+            actions_textbox.insert("end", f"{phrase}  ->  {command}")
 
     def _add_action():
         phrase = phrase_var.get().strip()
@@ -798,9 +796,12 @@ def main() -> None:
         _refresh_actions()
 
     def _remove_action():
-        if not actions:
+        if not actions or actions_textbox is None:
             return
-        actions.pop(-1)
+        selection = actions_textbox.curselection()
+        idx = selection[0] if selection else len(actions) - 1
+        if 0 <= idx < len(actions):
+            actions.pop(idx)
         _refresh_actions()
 
     # --- Apps list helpers ---
