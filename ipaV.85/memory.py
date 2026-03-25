@@ -1,10 +1,13 @@
 """
-VERA memory system — persistent key/value store for things VERA learns about the user.
-Stored in data/memory.json. All reads/writes go through this module.
+VERA memory system.
+
+Long-term: persistent key/value store written to data/memory.json.
+Short-term: in-memory session context, resets on restart. Never written to disk.
 """
 
 import json
 import os
+import time
 
 _MEMORY_PATH = os.path.join(os.path.dirname(__file__), "data", "memory.json")
 
@@ -49,3 +52,49 @@ def recall(key: str, default=None):
 def recall_all() -> dict:
     """Return the full memory dict."""
     return load_memory()
+
+
+# ---------------------------------------------------------------------------
+# Short-term session memory (in-RAM only, resets on restart)
+# ---------------------------------------------------------------------------
+
+_SESSION: dict = {
+    "start_time": time.time(),
+    "mood": None,          # e.g. "tired", "hungry", "frustrated", "good"
+    "activity": None,      # e.g. "star citizen", "working", "gaming"
+    "last_topic": None,    # last thing the user mentioned
+    "command_count": 0,
+}
+
+
+def set_session(key: str, value) -> None:
+    """Set a session context value."""
+    _SESSION[key] = value
+
+
+def get_session(key: str, default=None):
+    """Get a session context value."""
+    return _SESSION.get(key, default)
+
+
+def session_minutes() -> float:
+    """How many minutes since VERA started this session."""
+    return (time.time() - _SESSION["start_time"]) / 60
+
+
+def increment_command_count() -> int:
+    """Increment and return the session command count."""
+    _SESSION["command_count"] = _SESSION.get("command_count", 0) + 1
+    return _SESSION["command_count"]
+
+
+def clear_session() -> None:
+    """Reset session context (called on restart)."""
+    _SESSION.clear()
+    _SESSION.update({
+        "start_time": time.time(),
+        "mood": None,
+        "activity": None,
+        "last_topic": None,
+        "command_count": 0,
+    })

@@ -113,10 +113,63 @@ _CONFIRM_RESPONSES: dict[str, list[str]] = {
 }
 
 
+_ACTIVITY_CONFIRMS: dict[str, list[str]] = {
+    "star citizen": [
+        "On it, good luck out there",
+        "Done, fly safe",
+        "Got it, stay sharp out there",
+        "On it, don't let them catch you",
+        "Done, keep it together out there",
+    ],
+    "gaming": [
+        "On it, good luck",
+        "Done, get that win",
+        "Got it, stay focused",
+        "On it, let's get it",
+    ],
+    "working": [
+        "Done, stay focused",
+        "On it, keep grinding",
+        "Got it, you got this",
+        "Done, heads down",
+    ],
+}
+
+
+_SESSION_COMMENTS = [
+    "Hey, you've been at it for a while — take a break when you can",
+    "You've been grinding, don't forget to rest",
+    "Long session today — make sure you eat something",
+    "You've been going for a while, take it easy",
+    "Don't forget to take a break at some point",
+]
+
+
 def get_confirm(category: str = "default") -> str:
-    """Return a random confirmation line for the given category."""
+    """Return a random confirmation line, activity-aware and occasionally session-nudging."""
+    try:
+        from memory import get_session as _gs, session_minutes as _sm
+        activity = (_gs("activity") or "").lower()
+        mins = _sm()
+    except Exception:
+        activity = ""
+        mins = 0
+
+    # Activity-aware confirm (1 in 4 chance when activity is known)
+    if activity and random.random() < 0.25:
+        for key, pool in _ACTIVITY_CONFIRMS.items():
+            if key in activity:
+                return random.choice(pool)
+
     pool = _CONFIRM_RESPONSES.get(category, _CONFIRM_RESPONSES["default"])
-    return random.choice(pool)
+    base = random.choice(pool)
+
+    # Session length nudge (1 in 5 after 60min, 1 in 4 after 90min)
+    chance = 0.25 if mins >= 90 else (0.20 if mins >= 60 else 0)
+    if chance and random.random() < chance:
+        return f"{base}. {random.choice(_SESSION_COMMENTS)}"
+
+    return base
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +487,6 @@ def get_fallback() -> str:
 
 
 def _get_name() -> str:
-    """Return the user's name from memory if known, else empty string."""
     try:
         from memory import recall as _recall
         return _recall("name") or ""
@@ -442,26 +494,74 @@ def _get_name() -> str:
         return ""
 
 
+def _get_session_ctx() -> dict:
+    try:
+        from memory import get_session as _gs, session_minutes as _sm
+        return {
+            "mood": _gs("mood"),
+            "activity": _gs("activity"),
+            "minutes": _sm(),
+            "commands": _gs("command_count", 0),
+        }
+    except Exception:
+        return {}
+
+
 def handle_social(transcript: str, speak_fn) -> bool:
     """
     Check transcript against social patterns and speak a response.
+    Uses long-term name memory and short-term session context for richer replies.
     Returns True if a social response was triggered, False otherwise.
-    speak_fn should be a callable that takes a string and speaks it.
     """
     t = transcript.lower()
     name = _get_name()
+    ctx = _get_session_ctx()
+    mood = ctx.get("mood")
+    activity = ctx.get("activity")
+    minutes = ctx.get("minutes", 0)
+
     for pattern, pool in _SOCIAL_PATTERNS:
         if re.search(pattern, t):
             response = random.choice(pool)
-            # Inject name into greeting/morning responses if known
-            if name and re.search(r"\b(good morning|morning|hey|hello|what's up)\b", t):
-                greetings_with_name = [
-                    f"Hey {name}, what's up",
-                    f"Morning {name}, hope you slept good",
-                    f"Hey {name}",
-                    f"What's up {name}",
-                ]
-                response = random.choice(greetings_with_name)
+
+            # Name-aware greetings
+            if re.search(r"\b(good morning|morning|hey|hello|what's up|wassup|sup)\b", t):
+                if name:
+                    response = random.choice([
+                        f"Hey {name}, what's up",
+                        f"Hey {name}",
+                        f"What's up {name}",
+                        f"Morning {name}, hope you slept good" if "morning" in t else f"Hey {name}, what do you need",
+                    ])
+
+            # Session-aware how are you
+            elif re.search(r"\b(how are you|how are you doing|how's it going|you good)\b", t):
+                if mood and mood in ("tired", "exhausted", "stressed", "frustrated"):
+                    response = random.choice([
+                        f"Hanging in there, how about you",
+                        f"I'm good, still thinking about what you said earlier though — you doing okay?",
+                        f"I'm good. You still feeling {mood}?",
+                    ])
+                elif minutes > 60:
+                    response = random.choice([
+                        f"Doing good, you've been at it for a while though — you doing alright?",
+                        f"All good on my end, you've been grinding for over an hour",
+                    ])
+                else:
+                    response = random.choice([
+                        "Doing good, what do you need",
+                        "All good here, what's up",
+                        "Good, ready to go",
+                    ])
+
+            # Long session callback
+            elif re.search(r"\b(thanks|thank you|ty)\b", t) and minutes > 90:
+                if name:
+                    response = random.choice([
+                        f"Of course {name}, you've been at it a while — take a break when you can",
+                        f"Anytime {name}",
+                    ])
+
             speak_fn(response)
             return True
     return False

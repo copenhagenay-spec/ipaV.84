@@ -519,6 +519,10 @@ _MISHEAR_MAP = {
     "any may": "anime",
     "any me": "anime",
     "anymay": "anime",
+    # purge variants
+    "perch": "purge",
+    "perge": "purge",
+    "merge": "purge",
     # restart assistant variants
     "we start assistant": "restart assistant",
     "i start assistant": "restart assistant",
