@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.86
+- Discord delete — "discord delete <channel>" removes the last message (requires MANAGE_MESSAGES)
+- Discord purge — "discord purge <channel> <n>" bulk deletes up to 100 messages
+- Voice Actions list now clickable — select any entry and Remove Selected instead of only removing last
+- Punctuation stripping in transcript preprocessing — fixes faster-whisper adding periods/commas/question marks that broke command matching
+- Mishear corrections for purge (perch/perge/merge → purge)
+
+## 0.85.5
+- New brand assets — low-poly plant icon and VERA figure logo with transparent backgrounds
+- Status indicator dot in status bar (gray=idle, green=listening, red=recording, blue=processing)
+- faster-whisper replaces Vosk — MIT licensed, auto-downloads on first run (~150MB), better accuracy
+- kokoro-onnx replaces kokoro — compatible with Python 3.14, uses offline model files
+- VERA.exe launcher — no console window on startup
+- Add Desktop Shortcut button in Settings → Utilities
+
+## 0.85.2
+- Intent-based command router — decorator-based priority system replacing if/elif chain
+- preprocess_transcript() pipeline — filler strip, mishear corrections, leading/trailing noise removal
+- Memory system — long-term (memory.json) + short-term session context
+- Conversational depth — mood/activity detection, session-aware responses, name-aware greetings
+
 ## 0.85.1
 - Personality system — moved all response pools into `personality.py` for cleaner separation
 - Wake acknowledgments — 15 random lines when wake word triggers

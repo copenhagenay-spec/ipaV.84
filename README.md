@@ -40,7 +40,7 @@ Say `what can I say` at any time to hear all available commands.
 | Notes | `note <text>`, `open notes`, `delete last note` |
 | Clipboard | `copy that`, `read clipboard`, `clear clipboard` |
 | Keybinds | `reload` → presses R (configured in Actions tab) |
-| Discord | `discord <channel> <message>`, `read discord <channel>` |
+| Discord | `discord <channel> <message>`, `read discord <channel>`, `discord delete <channel>`, `discord purge <channel> <n>` |
 | System | `sleep computer`, `restart assistant` |
 | Conversation | `tell me a joke`, `what's your name`, `good morning` |
 
