@@ -2,8 +2,8 @@
 ; Requires Inno Setup 6+ — https://jrsoftware.org/isinfo.php
 
 #define AppName "VERA"
-#define AppVersion "0.85.2"
-#define AppExe "run_ipa.cmd"
+#define AppVersion "0.85.4"
+#define AppExe "launcher_out\VERA.exe"
 
 [Setup]
 AppName={#AppName}
@@ -40,25 +40,25 @@ Source: "VERSION";           DestDir: "{app}";              Flags: ignoreversion
 ; Assets
 Source: "data\assets\*";     DestDir: "{app}\data\assets";  Flags: ignoreversion recursesubdirs
 
-; Vosk speech models (bundled — already downloaded)
-Source: "data\model\*";      DestDir: "{app}\data\model";   Flags: ignoreversion recursesubdirs
-
 ; Docs
 Source: "docs\*";            DestDir: "{app}\docs";         Flags: ignoreversion recursesubdirs
 
 ; setup_installer.cmd is generated below — drives pip + Kokoro model download
 Source: "setup_installer.cmd"; DestDir: "{app}";            Flags: ignoreversion
 
+; Launcher exe — proper Windows app shortcut with icon
+Source: "launcher_out\VERA.exe"; DestDir: "{app}\launcher_out"; Flags: ignoreversion
+
 [Icons]
 ; Start Menu
-Name: "{group}\{#AppName}";           Filename: "{app}\{#AppExe}"; IconFilename: "{app}\data\assets\ipa.ico"
+Name: "{group}\{#AppName}";           Filename: "{app}\{#AppExe}"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 
 ; Desktop shortcut (optional)
-Name: "{commondesktop}\{#AppName}";   Filename: "{app}\{#AppExe}"; IconFilename: "{app}\data\assets\ipa.ico"; Tasks: desktopicon
+Name: "{commondesktop}\{#AppName}";   Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 ; Startup (optional)
-Name: "{userstartup}\{#AppName}";     Filename: "{app}\{#AppExe}"; IconFilename: "{app}\data\assets\ipa.ico"; Tasks: startupicon
+Name: "{userstartup}\{#AppName}";     Filename: "{app}\{#AppExe}"; Tasks: startupicon
 
 [Run]
 ; Run dependency installer after files are copied

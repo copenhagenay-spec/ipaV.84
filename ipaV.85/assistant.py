@@ -359,20 +359,12 @@ def main() -> None:
     # --- Helper functions (logic unchanged) ---
 
     def _model_dir() -> str:
-        lang = language.get().lower()
-        if lang.startswith("span"):
-            return os.path.join(os.path.dirname(__file__), "data", "model", "es")
-        return os.path.join(os.path.dirname(__file__), "data", "model", "en")
+        # No longer used for STT — faster-whisper manages its own model cache
+        return ""
 
     def _model_present() -> bool:
-        model_dir = _model_dir()
-        if not os.path.isdir(model_dir):
-            return False
-        try:
-            entries = [os.path.join(model_dir, n) for n in os.listdir(model_dir)]
-            return any(os.path.isdir(p) for p in entries)
-        except Exception:
-            return False
+        # faster-whisper auto-downloads on first use — always report ready
+        return True
 
     def _build_config(wizard_done: bool | None = None) -> dict:
         try:
@@ -1101,42 +1093,38 @@ def main() -> None:
     def _wake_word_loop():
         try:
             import sounddevice as sd  # type: ignore
-            from vosk import KaldiRecognizer  # type: ignore
-            from app import _resolve_model_path, _model_cache
-            import json as _json
-
-            model_path = _model_dir()
-            resolved = _resolve_model_path(model_path)
-            if resolved not in _model_cache:
-                from vosk import Model  # type: ignore
-                _model_cache[resolved] = Model(resolved)
-            model = _model_cache[resolved]
+            import numpy as np  # type: ignore
+            from app import _get_whisper_model
 
             samplerate = 16000
-            rec = KaldiRecognizer(model, samplerate)
+            chunk_seconds = 1.5  # listen in 1.5s chunks for wake word
+            chunk_samples = int(samplerate * chunk_seconds)
+
+            model = _get_whisper_model()
+
             q: queue.Queue = queue.Queue()
 
             def _cb(indata, frames, time_info, status):
-                q.put(bytes(indata))
+                q.put(indata.copy())
 
-            with sd.RawInputStream(samplerate=samplerate, blocksize=4000, dtype="int16", channels=1, callback=_cb):
+            with sd.InputStream(samplerate=samplerate, channels=1, dtype="float32", callback=_cb):
+                audio_buf = np.zeros(0, dtype="float32")
                 while not _wake_stop.is_set():
                     try:
-                        data = q.get(timeout=0.5)
+                        chunk = q.get(timeout=0.3)
+                        audio_buf = np.concatenate([audio_buf, chunk.flatten()])
                     except Exception:
                         continue
-                    triggered = False
-                    if rec.AcceptWaveform(data):
-                        text = _json.loads(rec.Result()).get("text", "").lower()
-                        if any(p in text for p in _WAKE_PHRASES):
-                            triggered = True
-                    else:
-                        text = _json.loads(rec.PartialResult()).get("partial", "").lower()
-                        if any(p in text for p in _WAKE_PHRASES):
-                            triggered = True
-                            rec = KaldiRecognizer(model, samplerate)
 
-                    if triggered and not _wake_stop.is_set():
+                    if len(audio_buf) < chunk_samples:
+                        continue
+
+                    # Transcribe the buffer and check for wake phrase
+                    segments, _ = model.transcribe(audio_buf, language="en", beam_size=1, vad_filter=True)
+                    text = " ".join(seg.text.strip() for seg in segments).lower()
+                    audio_buf = np.zeros(0, dtype="float32")
+
+                    if any(p in text for p in _WAKE_PHRASES) and not _wake_stop.is_set():
                         from personality import get_wake_ack  # type: ignore
                         from skills import _kokoro_tts_play  # type: ignore
                         _kokoro_tts_play(get_wake_ack())  # blocks until done
@@ -1146,30 +1134,25 @@ def main() -> None:
                                 q.get_nowait()
                             except Exception:
                                 break
+                        audio_buf = np.zeros(0, dtype="float32")
                         # Beep to signal mic is open and ready
                         import winsound as _winsound
                         _winsound.Beep(880, 150)
-                        # Record command using the already-running stream
-                        cmd_rec = KaldiRecognizer(model, samplerate)
-                        cmd_parts = []
+                        # Record command
+                        cmd_chunks = []
                         cmd_end = time.time() + 5
-                        while time.time() < cmd_end:
+                        while time.time() < cmd_end and not _wake_stop.is_set():
                             try:
-                                data = q.get(timeout=0.5)
+                                cmd_chunks.append(q.get(timeout=0.3).flatten())
                             except Exception:
                                 continue
-                            if cmd_rec.AcceptWaveform(data):
-                                res = _json.loads(cmd_rec.Result())
-                                if res.get("text"):
-                                    cmd_parts.append(res["text"])
-                        final = _json.loads(cmd_rec.FinalResult())
-                        if final.get("text"):
-                            cmd_parts.append(final["text"])
-                        command = " ".join(cmd_parts).strip()
-                        if command:
-                            root.after(0, lambda t=command: _update_transcript(t))
-                            handle_transcript(command, allow_prompt=True, confirm_fn=_confirm_prompt, restart_fn=_do_restart)
-                        rec = KaldiRecognizer(model, samplerate)
+                        if cmd_chunks:
+                            cmd_audio = np.concatenate(cmd_chunks)
+                            segs, _ = model.transcribe(cmd_audio, language="en", beam_size=1, vad_filter=True)
+                            command = " ".join(seg.text.strip() for seg in segs).strip()
+                            if command:
+                                root.after(0, lambda t=command: _update_transcript(t))
+                                handle_transcript(command, allow_prompt=True, confirm_fn=_confirm_prompt, restart_fn=_do_restart)
         except Exception as exc:
             print(f"Wake word error: {exc}")
 
@@ -1201,11 +1184,6 @@ def main() -> None:
 
     # --- Setup Wizard ---
     def _run_wizard():
-        model_urls = {
-            "en": "https://github.com/copenhagenay-spec/IPA-alpha/releases/download/dependency/vosk-model-small-en-us-0.15.zip",
-            "en_standard": "https://github.com/copenhagenay-spec/IPA-alpha/releases/download/dependency3/vosk-model-en-us-0.22-lgraph.zip",
-            "es": "https://github.com/copenhagenay-spec/IPA-alpha/releases/download/dependency2/vosk-model-small-es-0.42.zip",
-        }
         state = {
             "mode": mode,
             "language": language,
@@ -1228,7 +1206,7 @@ def main() -> None:
             "HOTKEY_CHOICES": HOTKEY_CHOICES,
             "LANG_CHOICES": LANG_CHOICES,
         }
-        wizard.run_wizard(root, state, callbacks, constants, model_urls)
+        wizard.run_wizard(root, state, callbacks, constants, {})
     # --- System Tray ---
     def _create_tray_icon():
         try:
@@ -1315,7 +1293,7 @@ def main() -> None:
         root.after(400, _poll_minimize)
 
     def _install_deps():
-        deps = ["sounddevice", "vosk", "pynput", "pystray", "pillow", "customtkinter", "pyttsx3"]
+        deps = ["sounddevice", "faster-whisper", "pynput", "pystray", "pillow", "customtkinter", "pyttsx3"]
         status_var.set("Installing dependencies...")
 
         def _run():
@@ -1417,7 +1395,7 @@ def main() -> None:
 
     def _create_shortcuts_worker():
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        target = os.path.join(base_dir, "run_ipa.vbs")
+        target = os.path.join(base_dir, "launcher_out", "VERA.exe")
         icon = os.path.join(base_dir, "data", "assets", "ipa.ico")
         desktop = os.path.join(os.environ.get("USERPROFILE", ""), "Desktop", "VERA.lnk")
         start_menu_dir = os.path.join(

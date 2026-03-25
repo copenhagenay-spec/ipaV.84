@@ -43,7 +43,7 @@ echo.
 
 echo Installing VERA dependencies...
 %PYTHON% -m pip install --upgrade pip
-%PYTHON% -m pip install sounddevice vosk pynput pystray pillow customtkinter pyttsx3 pycaw kokoro-onnx soundfile
+%PYTHON% -m pip install sounddevice faster-whisper pynput pystray pillow customtkinter pyttsx3 pycaw kokoro-onnx soundfile
 if %ERRORLEVEL% neq 0 (
     echo.
     echo ERROR: Failed to install dependencies.

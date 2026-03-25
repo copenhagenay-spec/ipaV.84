@@ -1,4 +1,4 @@
-"""Setup wizard UI for IPA."""
+"""Setup wizard UI for VERA."""
 
 from __future__ import annotations
 
@@ -23,14 +23,14 @@ def _create_shortcut():
             os.environ.get("APPDATA", ""),
             "Microsoft", "Windows", "Start Menu", "Programs",
         )
-        shortcut_path = os.path.join(desktop, "IPA.lnk")
-        start_path = os.path.join(start_menu, "IPA.lnk")
+        shortcut_path = os.path.join(desktop, "VERA.lnk")
+        start_path = os.path.join(start_menu, "VERA.lnk")
 
         # Remove stale entries to prevent "(2)" duplicates
         for stale in [
-            os.path.join(start_menu, "IPA.lnk"),
-            os.path.join(start_menu, "IPA (2).lnk"),
-            os.path.join(desktop, "IPA (2).lnk"),
+            os.path.join(start_menu, "VERA.lnk"),
+            os.path.join(start_menu, "VERA (2).lnk"),
+            os.path.join(desktop, "VERA (2).lnk"),
         ]:
             try:
                 os.remove(stale)
@@ -64,7 +64,7 @@ def run_wizard(
     model_urls: dict,
 ):
     wizard = ctk.CTkToplevel(root)
-    wizard.title("IPA Setup Wizard")
+    wizard.title("VERA Setup Wizard")
     wizard.geometry("560x520")
     wizard.resizable(True, True)
     wizard.transient(root)
@@ -103,6 +103,11 @@ def run_wizard(
     _save_config = callbacks["save_config"]
     _start_background = callbacks["start_background"]
 
+    # Progress bar widgets — created once, shown/hidden as needed
+    import tkinter as _tk
+    _dl_progress_var = _tk.DoubleVar(value=0.0)
+    _dl_status_var = _tk.StringVar(value="")
+
     def _download_model(lang: str, url: str):
         dest_root = os.path.join(os.path.dirname(__file__), "data", "model")
         os.makedirs(dest_root, exist_ok=True)
@@ -110,9 +115,25 @@ def run_wizard(
         extract_dir = os.path.join(dest_root, lang)
         os.makedirs(extract_dir, exist_ok=True)
 
+        def _reporthook(block_num, block_size, total_size):
+            if total_size > 0:
+                pct = min(block_num * block_size / total_size, 1.0)
+                mb_done = block_num * block_size / 1_048_576
+                mb_total = total_size / 1_048_576
+                wizard.after(0, lambda p=pct, d=mb_done, t=mb_total: (
+                    _dl_progress_var.set(p),
+                    _dl_status_var.set(f"Downloading... {d:.1f} / {t:.1f} MB"),
+                ))
+
         def _run():
             try:
-                urllib.request.urlretrieve(url, zip_path)
+                wizard.after(0, lambda: (
+                    _dl_progress_var.set(0.0),
+                    _dl_status_var.set("Starting download..."),
+                    _dl_progress_frame.pack(fill="x", padx=10, pady=(4, 0)),
+                ))
+                urllib.request.urlretrieve(url, zip_path, reporthook=_reporthook)
+                wizard.after(0, lambda: _dl_status_var.set("Extracting..."))
                 import shutil
                 for item in os.listdir(extract_dir):
                     item_path = os.path.join(extract_dir, item)
@@ -120,14 +141,20 @@ def run_wizard(
                         shutil.rmtree(item_path)
                 with zipfile.ZipFile(zip_path, "r") as zf:
                     zf.extractall(extract_dir)
+                wizard.after(0, lambda: (
+                    _dl_progress_var.set(1.0),
+                    _dl_status_var.set("Done!"),
+                ))
                 messagebox.showinfo("Done", f"{lang.upper()} model downloaded.")
+                wizard.after(0, lambda: _dl_progress_frame.pack_forget())
             except Exception as exc:
+                wizard.after(0, lambda: _dl_progress_frame.pack_forget())
                 messagebox.showerror("Download Error", str(exc))
 
         threading.Thread(target=_run, daemon=True).start()
 
     def _install_deps_wizard():
-        deps = ["sounddevice", "vosk", "pynput", "pystray", "pillow", "customtkinter"]
+        deps = ["sounddevice", "faster-whisper", "pynput", "pystray", "pillow", "customtkinter"]
 
         def _run():
             try:
@@ -145,14 +172,13 @@ def run_wizard(
             _create_shortcut()
         wizard.destroy()
         _start_background()
-        messagebox.showinfo("Done", "Setup complete. IPA is ready.")
+        messagebox.showinfo("Done", "Setup complete. VERA is ready.")
 
     # Header
-    ctk.CTkLabel(scroll, text="Welcome to IPA!", font=("Segoe UI", 16, "bold")).pack(
+    ctk.CTkLabel(scroll, text="Welcome to VERA!", font=("Segoe UI", 16, "bold")).pack(
         anchor="w", padx=10, pady=(6, 4)
     )
-    status_text = "Found" if _model_present() else "Not found"
-    ctk.CTkLabel(scroll, text=f"Model status: {status_text}").pack(anchor="w", padx=10, pady=(0, 8))
+    ctk.CTkLabel(scroll, text="Speech model: auto-downloads on first use (~150MB)", text_color="gray").pack(anchor="w", padx=10, pady=(0, 8))
 
     # Language
     lang_row = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -196,24 +222,13 @@ def run_wizard(
         anchor="w", padx=16, pady=2
     )
 
-    # Model download buttons
-    btn_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-    btn_frame.pack(fill="x", padx=10, pady=(10, 4))
-    ctk.CTkButton(
-        btn_frame,
-        text="English Model - Small (faster)",
-        command=lambda: _download_model("en", model_urls["en"]),
-    ).pack(side="left", padx=6, pady=8)
-    ctk.CTkButton(
-        btn_frame,
-        text="English Model - Standard (better accuracy)",
-        command=lambda: _download_model("en", model_urls["en_standard"]),
-    ).pack(side="left", padx=6, pady=8)
-    ctk.CTkButton(
-        btn_frame,
-        text="Spanish Model",
-        command=lambda: _download_model("es", model_urls["es"]),
-    ).pack(side="left", padx=6, pady=8)
+    # Speech model info
+    ctk.CTkLabel(
+        scroll,
+        text="VERA uses Whisper for speech recognition. The model (~150MB) will download automatically\nthe first time you speak — no manual setup needed.",
+        text_color="gray",
+        justify="left",
+    ).pack(anchor="w", padx=10, pady=(4, 8))
 
     btn_frame2 = ctk.CTkFrame(scroll, fg_color="transparent")
     btn_frame2.pack(fill="x", padx=10, pady=(0, 4))
