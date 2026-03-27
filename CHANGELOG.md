@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.86.2
+- Fixed VERA.exe not launching after fresh install — launcher was spawning itself recursively instead of finding the real Python interpreter
+
 ## 0.86.1
 - Pinned all Python dependencies to exact versions with SHA256 hashes — prevents supply chain attacks
 - Fixed VERA.exe crash on fresh install (corrupted release build replaced with clean build)
