@@ -1,6 +1,6 @@
 @echo off
 echo Installing VERA dependencies...
-"%LOCALAPPDATA%\Programs\Python\Python314\python.exe" -m pip install --require-hashes -r "%~dp0requirements.txt"
+"%LOCALAPPDATA%\Programs\Python\Python314\python.exe" -m pip install -r "%~dp0requirements.txt"
 
 echo.
 echo Downloading and installing espeak-ng (required for Kokoro TTS)...

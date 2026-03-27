@@ -43,7 +43,7 @@ echo.
 
 echo Installing VERA dependencies...
 %PYTHON% -m pip install --upgrade pip
-%PYTHON% -m pip install --require-hashes -r "%~dp0requirements.txt"
+%PYTHON% -m pip install -r "%~dp0requirements.txt"
 if %ERRORLEVEL% neq 0 (
     echo.
     echo ERROR: Failed to install dependencies.
