@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.86.1
+- Pinned all Python dependencies to exact versions with SHA256 hashes — prevents supply chain attacks (poisoned PyPI packages will fail to install)
+- Fixed VERA.exe crash on fresh install (corrupted release build replaced with clean build)
+
 ## 0.86
 - Discord delete — "discord delete <channel>" removes the last message (requires MANAGE_MESSAGES)
 - Discord purge — "discord purge <channel> <n>" bulk deletes up to 100 messages

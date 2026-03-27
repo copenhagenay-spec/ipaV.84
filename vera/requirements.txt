@@ -1,0 +1,33 @@
+# VERA pinned dependencies with SHA256 hashes
+# Generated 2026-03-26 — update hashes when upgrading any package
+# Install with: pip install --require-hashes -r requirements.txt
+
+customtkinter==5.2.2 \
+    --hash=sha256:14ad3e7cd3cb3b9eb642b9d4e8711ae80d3f79fb82545ad11258eeffb2e6b37c
+
+faster-whisper==1.2.1 \
+    --hash=sha256:79a66ad50688c0b794dd501dc340a736992a6342f7f95e5811be60b5224a26a7
+
+kokoro-onnx==0.4.7 \
+    --hash=sha256:492599a54dcdbe62f90cf4f3d94c6c7fcd069adbbb9f6b71f79bcfb3cb66128b
+
+pillow==12.1.1 \
+    --hash=sha256:50480dcd74fa63b8e78235957d302d98d98d82ccbfac4c7e12108ba9ecbdba15
+
+pycaw==20251023 \
+    --hash=sha256:ef06d234a2fe3c175925a2a8c7ed8824e450851014fdb7d900af1b56ce422d4e
+
+pynput==1.8.1 \
+    --hash=sha256:42dfcf27404459ca16ca889c8fb8ffe42a9fe54f722fd1a3e130728e59e768d2
+
+pystray==0.19.5 \
+    --hash=sha256:a0c2229d02cf87207297c22d86ffc57c86c227517b038c0d3c59df79295ac617
+
+pyttsx3==2.99 \
+    --hash=sha256:ff3e4ff756c24d72b9f3f2f304e0edaafd0f58adb0e6f4b90d930440cda8b207
+
+sounddevice==0.5.5 \
+    --hash=sha256:cfc6b2c49fb7f555591c78cb8ecf48d6a637fd5b6e1db5fec6ed9365d64b3519
+
+soundfile==0.13.1 \
+    --hash=sha256:1e70a05a0626524a69e9f0f4dd2ec174b4e9567f4d8b6c11d38b5c289be36ee9
