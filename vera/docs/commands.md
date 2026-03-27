@@ -155,3 +155,11 @@ Custom phrases mapped to keypresses — configured in the **Actions** tab of the
 | `what can I say` | Opens the command reference window |
 | `show commands` | Same as above |
 | `show help` | Same as above |
+
+---
+
+## Mishear Training
+
+VERA didn't understand something? The Training tab lets you correct it so it works next time.
+
+> See the [Mishear Training Guide](training.md) for details.
