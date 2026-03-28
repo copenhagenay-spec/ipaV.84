@@ -256,6 +256,7 @@ def _ptt_beep(freq: int, duration_ms: int, volume: int) -> None:
 
 def main() -> None:
     # Single instance enforcement — prevent multiple VERA windows
+    _mutex = None
     try:
         import ctypes
         _mutex = ctypes.windll.kernel32.CreateMutexW(None, True, "VERASingleInstanceMutex")
@@ -268,6 +269,15 @@ def main() -> None:
             return
     except Exception:
         pass
+
+    def _release_mutex():
+        try:
+            if _mutex:
+                import ctypes as _ct
+                _ct.windll.kernel32.ReleaseMutex(_mutex)
+                _ct.windll.kernel32.CloseHandle(_mutex)
+        except Exception:
+            pass
 
     cfg = load_config()
     if cfg and "wizard_done" not in cfg:
@@ -329,6 +339,12 @@ def main() -> None:
         value=cfg.get("search_engine", "https://www.google.com/search?q={query}")
     )
     ptt_beep_volume = tk.IntVar(value=int(cfg.get("ptt_beep_volume", 80)))
+
+    # TTS output device — get available output device names for dropdown
+    import sounddevice as _sd
+    _all_devices = _sd.query_devices()
+    tts_device_choices = ["Default"] + [d["name"] for d in _all_devices if d["max_output_channels"] > 0]
+    tts_output_device = tk.StringVar(value=cfg.get("tts_output_device", "") or "Default")
     confirm_actions = tk.BooleanVar(value=bool(cfg.get("confirm_actions", False)))
     spotify_media = tk.BooleanVar(value=bool(cfg.get("spotify_media", False)))
     spotify_requires = tk.BooleanVar(value=bool(cfg.get("spotify_requires_keyword", False)))
@@ -429,6 +445,7 @@ def main() -> None:
             "hold_key": holdkey.get(),
             "search_engine": search_engine.get().strip(),
             "ptt_beep_volume": int(ptt_beep_volume.get()),
+            "tts_output_device": "" if tts_output_device.get() == "Default" else tts_output_device.get(),
             "confirm_actions": bool(confirm_actions.get()),
             "spotify_media": bool(spotify_media.get()),
             "spotify_requires_keyword": bool(spotify_requires.get()),
@@ -457,6 +474,7 @@ def main() -> None:
             listener.stop()
             if tray_icon["icon"] is not None:
                 tray_icon["icon"].stop()
+            _release_mutex()
             script_path = os.path.abspath(__file__)
             subprocess.Popen([sys.executable, script_path])
             root.after(0, root.destroy)
@@ -586,6 +604,7 @@ def main() -> None:
                     pass
 
             messagebox.showinfo("Update", "Update installed. Restarting VERA...")
+            _release_mutex()
             script_path = os.path.abspath(__file__)
             subprocess.Popen([sys.executable, script_path])
             root.destroy()
@@ -1323,6 +1342,7 @@ def main() -> None:
                 listener.stop()
                 if tray_icon["icon"] is not None:
                     tray_icon["icon"].stop()
+                _release_mutex()
                 script_path = os.path.abspath(__file__)
                 subprocess.Popen([sys.executable, script_path])
                 root.destroy()
@@ -1521,6 +1541,8 @@ def main() -> None:
         "search_engine": search_engine,
         "confirm_actions": confirm_actions,
         "ptt_beep_volume": ptt_beep_volume,
+        "tts_output_device": tts_output_device,
+        "tts_device_choices": tts_device_choices,
         "theme_var": theme_var,
         "spotify_media": spotify_media,
         "spotify_requires": spotify_requires,

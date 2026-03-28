@@ -124,6 +124,8 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     search_engine = state["search_engine"]
     confirm_actions = state["confirm_actions"]
     ptt_beep_volume = state["ptt_beep_volume"]
+    tts_output_device = state["tts_output_device"]
+    tts_device_choices = state["tts_device_choices"]
     spotify_media = state["spotify_media"]
     spotify_requires = state["spotify_requires"]
     spotify_keywords = state["spotify_keywords"]
@@ -310,6 +312,13 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
                   command=lambda v: beep_vol_label.configure(text=f"{int(v)}%"),
                   width=200).pack(side="left", padx=(0, 8))
     beep_vol_label.pack(side="left")
+
+    rec_r6 = _card_row(rec_card)
+    ctk.CTkLabel(rec_r6, text="Voice Output", width=120).pack(side="left")
+    ctk.CTkOptionMenu(rec_r6, variable=tts_output_device,
+                      values=tts_device_choices, width=260).pack(side="left")
+    ctk.CTkLabel(rec_r6, text="  Select your virtual mic (e.g. VB-Cable) to route TTS to Discord",
+                 font=FONT_HELP, text_color=COLOR_HELP).pack(side="left", padx=(8, 0))
 
     # -- General Options --
     _section_header(settings_scroll, "General Options")

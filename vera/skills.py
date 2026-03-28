@@ -112,6 +112,19 @@ def _get_kokoro():
     return _kokoro_instance
 
 
+def _get_tts_device():
+    """Return sounddevice device index for the configured TTS output device, or None for default."""
+    import sounddevice as sd
+    device_name = load_config().get("tts_output_device", None)
+    if not device_name:
+        return None
+    devices = sd.query_devices()
+    for i, d in enumerate(devices):
+        if d["max_output_channels"] > 0 and device_name.lower() in d["name"].lower():
+            return i
+    return None
+
+
 def _kokoro_tts_play(text: str) -> None:
     """Generate and play audio via Kokoro TTS synchronously. Falls back to pyttsx3."""
     try:
@@ -144,6 +157,31 @@ def _tts_speak(text: str) -> bool:
     except Exception as exc:
         print(f"TTS failed: {exc}")
         _log_event(f"TTS_FAILED: {exc}")
+        return False
+
+
+def _kokoro_tts_play_device(text: str) -> None:
+    """Play TTS through the configured voice output device (for read out command only)."""
+    try:
+        import sounddevice as sd
+        kokoro = _get_kokoro()
+        samples, sample_rate = kokoro.create(text, voice=_VERA_KOKORO_VOICE, speed=1.0, lang="en-us")
+        device = _get_tts_device()
+        sd.play(samples, samplerate=sample_rate, device=device)
+        sd.wait()
+    except Exception as e:
+        _log_event(f"TTS_DEVICE_ERROR: {e}")
+        _kokoro_tts_play(text)
+
+
+def _tts_speak_to_device(text: str) -> bool:
+    """Speak through the configured voice output device (read out command only)."""
+    try:
+        threading.Thread(target=_kokoro_tts_play_device, args=(text,), daemon=True).start()
+        _log_event(f"TTS_DEVICE_SPEAK: {text}")
+        return True
+    except Exception as exc:
+        _log_event(f"TTS_DEVICE_FAILED: {exc}")
         return False
 
 
@@ -1666,7 +1704,7 @@ def _ih_type(m, t, allow_prompt, confirm_fn, restart_fn):
 # --- Read out (TTS) ---
 @_intent(820, r"\bread\s+out\s+(.+)$")
 def _ih_read_out(m, t, allow_prompt, confirm_fn, restart_fn):
-    _tts_speak(m.group(1).strip())
+    _tts_speak_to_device(m.group(1).strip())
     return True
 
 

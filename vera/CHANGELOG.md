@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.87.1
+- Voice Output device — select a virtual audio device (e.g. VB-Cable) in Settings; "read out" routes TTS through it so it plays through Discord as your mic
+- Fixed restart showing "already running" — mutex now released before spawning new process on all restart paths (voice command, tray icon, updater)
+
 ## 0.87.0
 - Mishear Training UI — new Training tab shows transcripts VERA didn't understand; click one, type what you meant, save; corrections apply immediately without restart
 - PTT beep volume — slider in Settings (0–100%) controls how loud the push-to-talk beeps are
