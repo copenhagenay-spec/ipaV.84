@@ -103,3 +103,9 @@ If you prefer to run from source instead of using the installer:
 1. Clone the repo
 2. Run `setup.cmd` to install dependencies
 3. Run `run_ipa.cmd` to start VERA
+
+---
+
+## Legal
+
+By using VERA you agree to the [Terms of Service](vera/docs/terms.md).
