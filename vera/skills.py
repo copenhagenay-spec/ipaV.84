@@ -790,6 +790,7 @@ _CLOSE_OVERRIDES = {
     "opera gx": "opera.exe",
     "opera": "opera.exe",
     "notepad": "notepad.exe",
+    "vera": None,  # handled via PID file — see _close_app
 }
 
 
@@ -799,7 +800,20 @@ def _close_app(app_name: str) -> bool:
     candidates = []
 
     if normalized in _norm_overrides:
-        candidates.append(_norm_overrides[normalized])
+        target = _norm_overrides[normalized]
+        if target is None:
+            # PID-based kill (e.g. vera — kills only this instance)
+            try:
+                pid_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "vera.pid")
+                with open(pid_path) as _pf:
+                    pid = int(_pf.read().strip())
+                result = subprocess.run(["taskkill", "/f", "/pid", str(pid)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                _log_event(f"CLOSE_VERA_PID: {pid} -> rc={result.returncode}")
+                return result.returncode == 0
+            except Exception as exc:
+                _log_event(f"CLOSE_VERA_PID_FAILED: {exc}")
+                return False
+        candidates.append(target)
     else:
         match = difflib.get_close_matches(normalized, list(_norm_overrides.keys()), n=1, cutoff=0.7)
         if match:

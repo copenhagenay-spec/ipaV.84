@@ -339,6 +339,15 @@ def main() -> None:
     except Exception:
         pass
 
+    # Write PID file so "close vera" can target this process specifically
+    _pid_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "vera.pid")
+    try:
+        os.makedirs(os.path.dirname(_pid_path), exist_ok=True)
+        with open(_pid_path, "w") as _pf:
+            _pf.write(str(os.getpid()))
+    except Exception:
+        pass
+
     def _release_mutex():
         try:
             if _mutex:

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.90.1.1
+- "close vera" now kills only the VERA process — PID written to `data/vera.pid` on startup; targeted kill instead of matching by exe name
+
 ## 0.90.0
 - UI overhaul — inline notifications replace popups, smooth scrolling, unsaved changes indicator, loading overlay, styled listboxes (thepyro-dev)
 - Inline key recording overlay — record hotkeys and hold keys directly inside the window instead of a separate dialog
