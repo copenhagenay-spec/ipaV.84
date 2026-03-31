@@ -210,6 +210,9 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     ptt_beep_volume = state["ptt_beep_volume"]
     tts_output_device = state["tts_output_device"]
     tts_device_choices = state["tts_device_choices"]
+    tts_voice = state["tts_voice"]
+    tts_voice_choices = state["tts_voice_choices"]
+    personality_mode = state["personality_mode"]
     spotify_media = state["spotify_media"]
     spotify_requires = state["spotify_requires"]
     spotify_keywords = state["spotify_keywords"]
@@ -332,6 +335,17 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
                                      corner_radius=8)
     history_textbox.pack(fill="x", padx=PAD_OUTER, pady=(0, 10))
 
+    # -- Community --
+    _section_header(home_scroll, "Community", "Join the VERA Discord server.")
+    community_card = _card(home_scroll)
+    community_row = _card_row(community_card)
+    _primary_btn(
+        community_row,
+        text="Join the Discord",
+        command=lambda: __import__("webbrowser").open("https://discord.gg/DCdHVEchet"),
+        width=160,
+    ).pack(side="left", padx=4)
+
     # =====================================================================
     # SETTINGS TAB
     # =====================================================================
@@ -401,6 +415,13 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     ctk.CTkLabel(rec_r6, text="  Select your virtual mic (e.g. VB-Cable) to route TTS to Discord",
                  font=FONT_HELP, text_color=COLOR_HELP).pack(side="left", padx=(8, 0))
 
+    rec_r7 = _card_row(rec_card)
+    ctk.CTkLabel(rec_r7, text="Voice", width=120).pack(side="left")
+    ctk.CTkOptionMenu(rec_r7, variable=tts_voice,
+                      values=tts_voice_choices, width=160).pack(side="left")
+    ctk.CTkLabel(rec_r7, text="  Choose VERA's voice (takes effect immediately)",
+                 font=FONT_HELP, text_color=COLOR_HELP).pack(side="left", padx=(8, 0))
+
     # -- General Options --
     _section_header(settings_scroll, "General Options")
     opt_card = _card(settings_scroll)
@@ -411,6 +432,39 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     ctk.CTkCheckBox(opt_card, text="Dark mode", variable=state["theme_var"],
                     command=_toggle_theme).pack(
         anchor="w", padx=PAD_CARD, pady=(4, 10))
+
+    # -- Personality --
+    _section_header(settings_scroll, "Personality",
+                    "Choose how VERA speaks to you.")
+    personality_card = _card(settings_scroll)
+    personality_row = _card_row(personality_card)
+    ctk.CTkLabel(personality_row, text="Mode", width=120).pack(side="left")
+    try:
+        from license import is_premium as _is_premium
+        _premium = _is_premium()
+    except Exception:
+        _premium = False
+    if _premium:
+        ctk.CTkOptionMenu(
+            personality_row,
+            variable=personality_mode,
+            values=["default", "offensive"],
+            width=140,
+        ).pack(side="left")
+    else:
+        ctk.CTkOptionMenu(
+            personality_row,
+            variable=personality_mode,
+            values=["default", "offensive"],
+            width=140,
+            state="disabled",
+        ).pack(side="left")
+        ctk.CTkLabel(
+            personality_row,
+            text="  Offensive mode requires a Premium license",
+            font=FONT_HELP,
+            text_color=COLOR_HELP,
+        ).pack(side="left", padx=(8, 0))
 
     # -- Spotify --
     _section_header(settings_scroll, "Spotify",

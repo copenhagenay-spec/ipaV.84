@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.95
+- Premium tier foundation — `license.py` gate controls access to premium features; `premium` flag persists through config saves
+- Offensive personality mode (Premium) — alternate response pools across all response types: confirmations, wake acks, fallbacks, failures, and social interactions; unlocked via premium license
+- Offensive startup greetings — VERA greets differently at startup based on active personality mode
+- LLM-powered personality — `llm.py` hooks VERA's conversational responses into Groq (llama-3.1-8b-instant) for dynamic, context-aware replies; falls back to pools if key not set or call fails; uses existing Groq API key from settings
+- Personality mode selector — Settings UI shows a mode dropdown (Default / Offensive); locked with a message when premium is not active
+- TTS voice selection — dropdown in Settings to choose from 11 Kokoro voices; takes effect immediately
+- Conversational prefix stripping — natural phrases like "can you", "could you", "hey vera" stripped before command matching so commands work conversationally
+- Expanded social patterns — VERA now responds to: direct insults, "fuck you", "shut up", "don't talk to me like that", "what did you say", "huh", "sounds good", "pretty good", "dude", "yes/yeah", and more
+- Insult comebacks — in offensive mode VERA fires back at insults instead of giving polite responses
+- Discord community button — Join the Discord button on the Home tab
+- Session context in responses — mood, activity, last app, and name now influence personality responses
+- Repeat detection — VERA notices when the same phrase is said multiple times without success and suggests rephrasing
+- `premium` key preserved on config save — no longer wiped when settings are saved from the UI
+
 ## 0.90.1.1
 - "close vera" now kills only the VERA process — PID written to `data/vera.pid` on startup; targeted kill instead of matching by exe name
 

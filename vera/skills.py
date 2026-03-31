@@ -12,7 +12,7 @@ import subprocess
 import webbrowser
 
 from config import load_config
-from personality import get_confirm, handle_social, get_fallback, get_joke
+from personality import get_confirm, handle_social, get_fallback, get_joke, get_failure
 
 
 def _confirm(prompt: str, allow_prompt: bool, confirm_fn=None) -> bool:
@@ -92,7 +92,7 @@ def _open_notes() -> bool:
         _log_event(f"NOTES_OPEN_FAILED: {exc}")
         return False
 
-_VERA_KOKORO_VOICE = "af_heart"
+_VERA_KOKORO_VOICE_DEFAULT = "af_heart"
 _kokoro_instance = None
 
 
@@ -130,7 +130,8 @@ def _kokoro_tts_play(text: str) -> None:
     try:
         import sounddevice as sd  # type: ignore
         kokoro = _get_kokoro()
-        samples, sample_rate = kokoro.create(text, voice=_VERA_KOKORO_VOICE, speed=1.0, lang="en-us")
+        voice = load_config().get("tts_voice", _VERA_KOKORO_VOICE_DEFAULT)
+        samples, sample_rate = kokoro.create(text, voice=voice, speed=1.0, lang="en-us")
         sd.play(samples, samplerate=sample_rate)
         sd.wait()
     except Exception as e:
@@ -165,7 +166,8 @@ def _kokoro_tts_play_device(text: str) -> None:
     try:
         import sounddevice as sd
         kokoro = _get_kokoro()
-        samples, sample_rate = kokoro.create(text, voice=_VERA_KOKORO_VOICE, speed=1.0, lang="en-us")
+        voice = load_config().get("tts_voice", _VERA_KOKORO_VOICE_DEFAULT)
+        samples, sample_rate = kokoro.create(text, voice=voice, speed=1.0, lang="en-us")
         device = _get_tts_device()
         sd.play(samples, samplerate=sample_rate, device=device)
         sd.wait()
@@ -188,6 +190,11 @@ def _tts_speak_to_device(text: str) -> bool:
 def _vera_confirm(category: str = "default") -> None:
     """Speak a random confirmation line appropriate for the action category."""
     _tts_speak(get_confirm(category))
+
+
+def _vera_failure(category: str = "default") -> None:
+    """Speak a random failure line appropriate for the action category."""
+    _tts_speak(get_failure(category))
 
 
 def _list_notes(limit: int = 5) -> None:
@@ -446,17 +453,17 @@ def _normalize_numbers_in_text(text: str) -> str:
 
 def _parse_timer(text: str):
     # Examples: "set timer 5 minutes", "timer 10 sec", "set timer 1 hour"
-    m = re.search(r"\b(set\s+a\s+timer|set\s+timer|timer)\s+(\d+|\w+)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)?\b", text)
+    m = re.search(r"\b(set\s+a\s+timer|set\s+timer|timer)\s+(for\s+)?(\d+|\w+)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)?\b", text)
     if not m:
         return None
-    raw = m.group(2)
+    raw = m.group(3)
     if raw.isdigit():
         value = int(raw)
     else:
         value = _word_to_num(raw)
         if value is None:
             return None
-    unit = (m.group(3) or "seconds").lower()
+    unit = (m.group(4) or "seconds").lower()
     if unit.startswith("hour") or unit.startswith("hr"):
         seconds = value * 3600
         label = f"{value} hour(s)"
@@ -470,7 +477,7 @@ def _parse_timer(text: str):
 
 def _media_key(action: str) -> bool:
     try:
-        from pynput import keyboard  # type: ignore
+        from input_wrapper import keyboard  # type: ignore
     except Exception:
         print("Missing dependency: pynput (needed for media keys).")
         return False
@@ -688,11 +695,22 @@ def _apply_mishear_corrections(text: str) -> str:
 
 
 _FILLER_WORDS = re.compile(
-    r"\b(um+|uh+|hmm+|hm+|like|you know|i mean|so|well|actually|basically|literally|right)\b"
+    r"\b(um+|uh+|hmm+|hm+|like|i mean|so|well|actually|basically|literally|right)\b"
+)
+
+# Conversational prefixes people naturally say before a command
+_CONVERSATIONAL_PREFIX = re.compile(
+    r"^(hey vera[,]?\s*|vera[,]?\s*|hey there[,]?\s*|"
+    r"can you\s+|could you\s+|would you\s+|will you\s+|"
+    r"please\s+|go ahead and\s+|go on and\s+|"
+    r"i need you to\s+|i want you to\s+|i'd like you to\s+|id like you to\s+|"
+    r"i need to\s+|i want to\s+|"
+    r"hey can you\s+|hey could you\s+|hey would you\s+|"
+    r"do me a favor and\s+|do me a favour and\s+)"
 )
 
 _LEADING_NOISE = re.compile(r"^(the|a|an|i|hey|so|well|okay|ok)\s+")
-_TRAILING_NOISE = re.compile(r"\s+(please|now|for me|for me please)\s*$")
+_TRAILING_NOISE = re.compile(r"\s+(please|now|for me|for me please|for me thanks|thanks|thank you|real quick)\s*$")
 
 _NOISE_WORDS = {"the", "a", "an", "and", "of", "to", "in", "is", "it", "i", "uh", "um", "hmm"}
 
@@ -708,9 +726,16 @@ def preprocess_transcript(text: str) -> str:
     t = _FILLER_WORDS.sub("", t)
     # 4. Collapse extra whitespace
     t = re.sub(r"\s+", " ", t).strip()
-    # 5. Strip leading noise words
+    # 5. Strip conversational prefixes ("can you", "hey vera", "i need you to", etc.)
+    #    Loop to handle stacked prefixes e.g. "hey vera can you open discord"
+    for _ in range(3):
+        stripped = _CONVERSATIONAL_PREFIX.sub("", t).strip()
+        if stripped == t:
+            break
+        t = stripped
+    # 6. Strip leading noise words
     t = _LEADING_NOISE.sub("", t).strip()
-    # 6. Strip trailing polite words that add no meaning
+    # 7. Strip trailing polite words that add no meaning
     t = _TRAILING_NOISE.sub("", t).strip()
     return t
 
@@ -794,6 +819,13 @@ _CLOSE_OVERRIDES = {
 }
 
 
+_PROTECTED_PROCESSES = {
+    "explorer.exe", "winlogon.exe", "lsass.exe", "csrss.exe",
+    "svchost.exe", "services.exe", "smss.exe", "wininit.exe",
+    "system", "registry", "dwm.exe", "taskmgr.exe",
+}
+
+
 def _close_app(app_name: str) -> bool:
     normalized = _normalize_name(app_name)
     _norm_overrides = {_normalize_name(k): v for k, v in _CLOSE_OVERRIDES.items()}
@@ -823,6 +855,9 @@ def _close_app(app_name: str) -> bool:
     candidates.append(normalized.replace(" ", "") + ".exe")
 
     for exe in candidates:
+        if exe and exe.lower() in _PROTECTED_PROCESSES:
+            _log_event(f"CLOSE_BLOCKED: {exe} is a protected process")
+            return False
         try:
             result = subprocess.run(
                 ["taskkill", "/f", "/im", exe],
@@ -876,6 +911,7 @@ def _open_app(app_name: str, allow_prompt: bool, confirm_fn=None) -> bool:
         _last_app["command"] = command
     except Exception as exc:
         print(f"Failed to open app '{app_name}': {exc}")
+        return False
     return True
 
 
@@ -900,8 +936,10 @@ def _show_help() -> None:
         "=== Built-in Commands ===",
         "",
         "Apps & Actions:",
-        "  open <app>",
-        "  launch <app>",
+        "  open <app>  /  launch <app>",
+        "  open that again",
+        "  close <app>  /  close this",
+        "  add alias <name> for <app>",
         "",
         "Web:",
         "  search for <query>",
@@ -918,10 +956,17 @@ def _show_help() -> None:
         "  back / previous",
         "  sound on / sound off",
         "",
+        "Volume:",
+        "  mute / unmute",
+        "  volume up / volume down",
+        "  set volume <0-100>",
+        "  set volume max",
+        "",
         "Timers:",
         "  set a timer <n> minutes",
         "  set a timer <n> seconds",
         "  set a timer <n> hours",
+        "  cancel timer",
         "",
         "Notes:",
         "  note <text>",
@@ -929,6 +974,12 @@ def _show_help() -> None:
         "  list notes",
         "  delete last note",
         "  clear all notes",
+        "",
+        "Clipboard:",
+        "  read clipboard",
+        "  copy <text>",
+        "  paste that / paste clipboard",
+        "  clear clipboard",
         "",
         "System:",
         "  sleep computer",
@@ -941,13 +992,28 @@ def _show_help() -> None:
         "",
         "Discord:",
         "  discord <channel> <message>",
+        "  discord <server> <channel> <message>",
         "  read discord <channel>",
+        "  discord delete <channel>",
+        "  discord purge <channel> <n>",
         "",
         "AI:",
         "  ask <question>",
         "",
+        "Memory:",
+        "  my name is <name>",
+        "  remember <fact>",
+        "  forget <thing>",
+        "  what do you know about me",
+        "  what do you remember",
+        "",
         "Key Binds:",
         "  <your phrase>  (configured in Actions tab)",
+        "",
+        "Conversation:",
+        "  i'm tired / i'm happy / i'm stressed",
+        "  i'm playing <game>",
+        "  tell me a joke",
         "",
         "Help:",
         "  what can i say",
@@ -990,15 +1056,26 @@ def _show_help() -> None:
             "play / pause  /  skip / next  /  back / previous",
             "sound on / sound off",
         ]),
+        ("Volume", [
+            "mute  /  unmute",
+            "volume up  /  volume down",
+            "set volume <0-100>",
+            "set volume max",
+        ]),
         ("Timers", [
-            "set a timer <n> minutes",
-            "set a timer <n> seconds",
-            "set a timer <n> hours",
+            "set a timer <n> minutes / seconds / hours",
+            "cancel timer  /  stop timer",
         ]),
         ("Notes", [
             "note <text>",
             "open notes  /  list notes",
             "delete last note  /  clear all notes",
+        ]),
+        ("Clipboard", [
+            "read clipboard",
+            "copy <text>",
+            "paste that  /  paste clipboard",
+            "clear clipboard",
         ]),
         ("System", [
             "sleep computer",
@@ -1010,13 +1087,27 @@ def _show_help() -> None:
         ]),
         ("Discord", [
             "discord <channel> <message>",
+            "discord <server> <channel> <message>",
             "read discord <channel>",
+            "discord delete <channel>",
+            "discord purge <channel> <n>",
         ]),
         ("AI", [
             "ask <question>",
         ]),
+        ("Memory", [
+            "my name is <name>",
+            "remember <fact>",
+            "forget <thing>",
+            "what do you know about me",
+            "what do you remember",
+        ]),
         ("Key Binds", [
             "<your phrase>  (configured in Actions tab)",
+        ]),
+        ("Conversation", [
+            "i'm tired / happy / stressed / playing <game>",
+            "tell me a joke",
         ]),
         ("Help", [
             "what can i say",
@@ -1102,9 +1193,9 @@ def _resolve_key(raw: str):
     if raw.startswith("<") and raw.endswith(">"):
         raw = raw[1:-1].strip()
     if raw in ("x1", "x2"):
-        from pynput import mouse as _mouse  # type: ignore
+        from input_wrapper import mouse as _mouse  # type: ignore
         return ("mouse", _mouse.Button.x1 if raw == "x1" else _mouse.Button.x2)
-    from pynput import keyboard  # type: ignore
+    from input_wrapper import keyboard  # type: ignore
     if len(raw) == 1:
         return ("key", keyboard.KeyCode.from_char(raw))
     obj = getattr(keyboard.Key, raw, None)
@@ -1119,8 +1210,8 @@ _MODIFIER_NAMES = {"ctrl", "alt", "shift", "cmd"}
 def _press_key(key: str, count: int = 1) -> bool:
     """Press a single key or combo (e.g. 'alt+n', 'ctrl+shift+f', 'x1')."""
     try:
-        from pynput import keyboard as _kb  # type: ignore
-        from pynput import mouse as _mouse  # type: ignore
+        from input_wrapper import keyboard as _kb  # type: ignore
+        from input_wrapper import mouse as _mouse  # type: ignore
 
         parts = [p.strip().lower() for p in key.split("+")]
         modifiers = []
@@ -1180,7 +1271,7 @@ def _run_macro(sequence: str, count: int = 1) -> bool:
 
 def _send_message(text: str) -> bool:
     try:
-        from pynput.keyboard import Controller, Key  # type: ignore
+        from input_wrapper import KbController as Controller, Key  # type: ignore
         time.sleep(0.3)
         ctl = Controller()
         ctl.type(text)
@@ -1196,7 +1287,7 @@ def _send_message(text: str) -> bool:
 
 def _type_text(text: str) -> bool:
     try:
-        from pynput.keyboard import Controller  # type: ignore
+        from input_wrapper import KbController as Controller  # type: ignore
         time.sleep(0.3)
         Controller().type(text)
         _log_event(f"TYPE_TEXT: {text}")
@@ -1617,7 +1708,7 @@ def _intent(priority: int, pattern: str):
 
 
 # --- Help ---
-@_intent(1000, r"\b(what can i say|show commands|show help|list commands)\b")
+@_intent(1000, r"\b(what can i say|show commands|show help|list commands|what can you do|what can youtube|what do you do|what are you capable of)\b")
 def _ih_help(m, t, allow_prompt, confirm_fn, restart_fn):
     threading.Thread(target=_show_help, daemon=True).start()
     return True
@@ -1657,7 +1748,8 @@ def _ih_keybinds(m, t, allow_prompt, confirm_fn, restart_fn):
 # --- Send message ---
 @_intent(850, r"\bsend\s+message\s+(.+)$")
 def _ih_send_message(m, t, allow_prompt, confirm_fn, restart_fn):
-    _send_message(m.group(1).strip())
+    if not _send_message(m.group(1).strip()):
+        _vera_failure("send")
     return True
 
 
@@ -1721,7 +1813,7 @@ def _ih_forget(m, t, allow_prompt, confirm_fn, restart_fn):
 
 
 # --- Memory: what do you know ---
-@_intent(873, r"\b(what do you know about me|what do you remember|what have you remembered)\b")
+@_intent(876, r"\b(what do you know about me|what do about me|what about me|know about me|what do you remember|what have you remembered|tell me what you know)\b")
 def _ih_recall_all(m, t, allow_prompt, confirm_fn, restart_fn):
     from memory import recall_all as _recall_all
     data = _recall_all()
@@ -1738,7 +1830,8 @@ def _ih_recall_all(m, t, allow_prompt, confirm_fn, restart_fn):
 # --- Type text ---
 @_intent(830, r"\btype\s+(.+)$")
 def _ih_type(m, t, allow_prompt, confirm_fn, restart_fn):
-    _type_text(m.group(1).strip())
+    if not _type_text(m.group(1).strip()):
+        _vera_failure("typing")
     return True
 
 
@@ -1829,7 +1922,7 @@ def _ih_notes_delete_last(m, t, allow_prompt, confirm_fn, restart_fn):
 
 
 # --- Notes: add ---
-@_intent(740, r"\b(note|notes|take a note|add note|remember)\b\s*(.+)?$")
+@_intent(740, r"\b(note|notes|take a note|add note)\b\s*(.+)?$")
 def _ih_note_add(m, t, allow_prompt, confirm_fn, restart_fn):
     note_text = (m.group(2) or "").strip()
     if not note_text:
@@ -1896,8 +1989,9 @@ def _ih_mute(m, t, allow_prompt, confirm_fn, restart_fn):
         _saved_volume["level"] = 50
     if _set_volume(0):
         _vera_confirm("volume")
-        return True
-    return False
+    else:
+        _vera_failure("volume")
+    return True
 
 
 # --- Unmute ---
@@ -1907,17 +2001,19 @@ def _ih_unmute(m, t, allow_prompt, confirm_fn, restart_fn):
     if _set_volume(restore):
         _saved_volume["level"] = None
         _vera_confirm("volume")
-        return True
-    return False
+    else:
+        _vera_failure("volume")
+    return True
 
 
 # --- Volume max ---
-@_intent(650, r"\bset\s+volume\s+(max|maximum|full)\b")
+@_intent(650, r"\b(set\s+volume\s+(max|maximum|full)|turn\s+(the\s+)?volume\s+(up\s+)?(to\s+)?(max|maximum|full)|volume\s+(to\s+)?(max|maximum|full))\b")
 def _ih_volume_max(m, t, allow_prompt, confirm_fn, restart_fn):
     if _set_volume(100):
         _vera_confirm("volume")
-        return True
-    return False
+    else:
+        _vera_failure("volume")
+    return True
 
 
 # --- Volume set ---
@@ -1929,26 +2025,29 @@ def _ih_volume_set(m, t, allow_prompt, confirm_fn, restart_fn):
         level = max(0, min(100, round(int(level) / 10) * 10))
         if _set_volume(level):
             _vera_confirm("volume")
-            return True
-    return False
+        else:
+            _vera_failure("volume")
+    return True
 
 
 # --- Volume up ---
-@_intent(640, r"\bvolume\s+up\b")
+@_intent(640, r"\b(volume\s+up|turn\s+(the\s+)?volume\s+up|raise\s+(the\s+)?volume|volume\s+higher|louder)\b")
 def _ih_volume_up(m, t, allow_prompt, confirm_fn, restart_fn):
     if _adjust_volume("up"):
         _vera_confirm("volume")
-        return True
-    return False
+    else:
+        _vera_failure("volume")
+    return True
 
 
 # --- Volume down ---
-@_intent(635, r"\bvolume\s+down\b")
+@_intent(635, r"\b(volume\s+down|turn\s+(the\s+)?volume\s+down|lower\s+(the\s+)?volume|volume\s+lower|quieter|quiet(er)?\s+down)\b")
 def _ih_volume_down(m, t, allow_prompt, confirm_fn, restart_fn):
     if _adjust_volume("down"):
         _vera_confirm("volume")
-        return True
-    return False
+    else:
+        _vera_failure("volume")
+    return True
 
 
 # --- YouTube: open ---
@@ -2126,7 +2225,8 @@ def _ih_close_app(m, t, allow_prompt, confirm_fn, restart_fn):
     if _close_app(app):
         _vera_confirm("close")
         return True
-    return False
+    _vera_failure("close")
+    return True
 
 
 # --- Open app ---
@@ -2139,7 +2239,13 @@ def _ih_open_app(m, t, allow_prompt, confirm_fn, restart_fn):
             return True
     result = _open_app(app, allow_prompt, confirm_fn=confirm_fn)
     if result:
+        from memory import set_session as _ss
+        _ss("last_command", "open")
+        _ss("last_app", app)
         _vera_confirm("open")
+    else:
+        _vera_failure("open")
+        result = True
     return result
 
 
@@ -2202,7 +2308,7 @@ def _ih_clipboard_clear(m, t, allow_prompt, confirm_fn, restart_fn):
 @_intent(250, r"\b(paste\s+clipboard|paste\s+that|paste\s+it)\b")
 def _ih_clipboard_paste(m, t, allow_prompt, confirm_fn, restart_fn):
     try:
-        from pynput.keyboard import Controller as _KbCtrl, Key as _Key
+        from input_wrapper import KbController as _KbCtrl, Key as _Key
         _kb = _KbCtrl()
         _kb.press(_Key.ctrl)
         _kb.press('v')
@@ -2233,7 +2339,7 @@ def _ih_clipboard_copy(m, t, allow_prompt, confirm_fn, restart_fn):
 
 
 # --- State detection ("I'm tired", "I'm playing SC", etc.) ---
-@_intent(210, r"\bi('m| am)\s+(tired|exhausted|sleepy|bored|hungry|frustrated|stressed|anxious|happy|good|great|feeling\s+\w+|playing\s+.+|working\s+.+|gaming\b)")
+@_intent(210, r"\bi('m|m| am)\s+(tired|exhausted|sleepy|bored|hungry|frustrated|stressed|anxious|happy|good|great|feeling\s+\w+|playing\s+.+|working\s+.+|gaming\b)")
 def _ih_state(m, t, allow_prompt, confirm_fn, restart_fn):
     from memory import set_session as _set_session, get_session as _get_session
     import random as _r
@@ -2259,7 +2365,9 @@ def _ih_state(m, t, allow_prompt, confirm_fn, restart_fn):
         return True
 
     # Mood states
+    import time as _time
     _set_session("mood", state)
+    _set_session("mood_time", _time.time())
     _set_session("last_topic", state)
 
     mood_responses = {
@@ -2313,7 +2421,16 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
     if not t or t in _NOISE_WORDS:
         return False
 
-    from memory import increment_command_count as _inc_cmd
+    # Track repeat transcripts for conversational awareness
+    from memory import get_session as _gs, set_session as _ss, increment_command_count as _inc_cmd
+    last_repeat = _gs("repeat_transcript")
+    repeat_count = int(_gs("repeat_count") or 0)
+    if last_repeat == t:
+        _ss("repeat_count", repeat_count + 1)
+    else:
+        _ss("repeat_transcript", t)
+        _ss("repeat_count", 0)
+
     for _priority, pattern, handler in _INTENT_REGISTRY:
         m = pattern.search(t)
         if m:

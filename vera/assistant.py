@@ -1,4 +1,4 @@
-﻿"""All-in-one UI + background listener for the standalone assistant."""
+"""All-in-one UI + background listener for the standalone assistant."""
 
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ class BackgroundListener:
         ).start()
 
     def start_toggle(self, toggle_key: str, model_path: str, confirm_fn, on_text=None, restart_fn=None, on_record_start=None, on_record_end=None):
-        from pynput import keyboard  # type: ignore
+        from input_wrapper import keyboard  # type: ignore
 
         def _record():
             if on_record_start:
@@ -126,7 +126,7 @@ class BackgroundListener:
         self.listener.start()
 
     def start_hold(self, hold_key: str, model_path: str, confirm_fn, on_text=None, restart_fn=None, on_record_start=None, on_record_end=None):
-        from pynput import keyboard  # type: ignore
+        from input_wrapper import keyboard  # type: ignore
 
         def _record():
             if on_record_start:
@@ -140,7 +140,7 @@ class BackgroundListener:
             self.stop_event.clear()
 
         if _is_mouse_button(hold_key):
-            from pynput import mouse  # type: ignore
+            from input_wrapper import mouse  # type: ignore
             button_obj = _resolve_mouse_button(hold_key, mouse)
             if not button_obj:
                 raise ValueError("Invalid mouse button")
@@ -357,6 +357,42 @@ def main() -> None:
         except Exception:
             pass
 
+    # --- Discord Rich Presence ---
+    _RPC_CLIENT_ID = "1484663083438837801"
+    _rpc = {"conn": None, "start": int(time.time())}
+
+    def _rpc_connect():
+        try:
+            from pypresence import Presence
+            rpc = Presence(_RPC_CLIENT_ID)
+            rpc.connect()
+            _rpc["conn"] = rpc
+            _rpc_set("Standing by")
+        except Exception:
+            pass
+
+    def _rpc_set(state: str):
+        if not _rpc["conn"]:
+            return
+        try:
+            _rpc["conn"].update(
+                details="Voice assistant",
+                state=state,
+                start=_rpc["start"],
+            )
+        except Exception:
+            _rpc["conn"] = None
+
+    def _rpc_close():
+        if _rpc["conn"]:
+            try:
+                _rpc["conn"].close()
+            except Exception:
+                pass
+            _rpc["conn"] = None
+
+    threading.Thread(target=_rpc_connect, daemon=True).start()
+
     _test_update_alert = "--test-update-alert" in sys.argv
 
     cfg = load_config()
@@ -416,7 +452,16 @@ def main() -> None:
     _all_devices = _sd.query_devices()
     tts_device_choices = ["Default"] + [d["name"] for d in _all_devices if d["max_output_channels"] > 0]
     tts_output_device = tk.StringVar(value=cfg.get("tts_output_device", "") or "Default")
+    tts_voice_choices = [
+        "af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky",
+        "am_adam", "am_michael",
+        "bf_emma", "bf_isabella",
+        "bm_george", "bm_lewis",
+    ]
+    tts_voice = tk.StringVar(value=cfg.get("tts_voice", "af_heart"))
+    personality_mode = tk.StringVar(value=cfg.get("personality_mode", "default"))
     bug_report_secret_var = tk.StringVar(value=cfg.get("bug_report_secret", "") or "Z3JlZW5pc2RheQ==")
+    premium = tk.BooleanVar(value=bool(cfg.get("premium", False)))
     confirm_actions = tk.BooleanVar(value=bool(cfg.get("confirm_actions", False)))
     spotify_media = tk.BooleanVar(value=bool(cfg.get("spotify_media", False)))
     spotify_requires = tk.BooleanVar(value=bool(cfg.get("spotify_requires_keyword", False)))
@@ -551,6 +596,7 @@ def main() -> None:
     _runtime_mode = {"value": "idle"}
     _notice_after_id = {"id": None}
     _notice_action = {"callback": None}
+    _idle_timer = {"handle": None}
     _update_action = {"callback": None}
     _dismissed_update_version = {"value": str(cfg.get("dismissed_update_version", "")).strip()}
     save_button = None
@@ -599,6 +645,9 @@ def main() -> None:
             "search_engine": search_engine.get().strip(),
             "ptt_beep_volume": int(ptt_beep_volume.get()),
             "tts_output_device": "" if tts_output_device.get() == "Default" else tts_output_device.get(),
+            "tts_voice": tts_voice.get(),
+            "personality_mode": personality_mode.get(),
+            "premium": bool(premium.get()),
             "confirm_actions": bool(confirm_actions.get()),
             "spotify_media": bool(spotify_media.get()),
             "spotify_requires_keyword": bool(spotify_requires.get()),
@@ -611,6 +660,7 @@ def main() -> None:
             "discord_bot_token": discord_bot_token_var.get().strip(),
             "discord_server_id": discord_server_id_var.get().strip(),
             "gemini_api_key": gemini_api_key_var.get().strip(),
+            "premium": bool(cfg.get("premium", False)),
             "keybinds": [k for k in keybinds if k.get("phrase") and k.get("key")],
             "dismissed_update_version": _dismissed_update_version["value"],
             "bug_report_secret": bug_report_secret_var.get(),
@@ -781,7 +831,7 @@ def main() -> None:
 
     def _record_hotkey(target_var: tk.StringVar) -> None:
         try:
-            from pynput import keyboard  # type: ignore
+            from input_wrapper import keyboard  # type: ignore
         except Exception:
             _notify_error("Missing Dependency", "pynput is required to record hotkeys.")
             return
@@ -884,8 +934,8 @@ def main() -> None:
 
     def _record_hold_key(target_var: tk.StringVar) -> None:
         try:
-            from pynput import keyboard  # type: ignore
-            from pynput import mouse as pynput_mouse  # type: ignore
+            from input_wrapper import keyboard  # type: ignore
+            from input_wrapper import mouse as pynput_mouse  # type: ignore
         except Exception:
             _notify_error("Missing Dependency", "pynput is required to record keys.")
             return
@@ -1439,8 +1489,8 @@ def main() -> None:
     def _record_keybind_step(target_var: tk.StringVar) -> None:
         """Record a single key/combo and append it as a macro step."""
         try:
-            from pynput import keyboard as _kb  # type: ignore
-            from pynput import mouse as _ms  # type: ignore
+            from input_wrapper import keyboard as _kb  # type: ignore
+            from input_wrapper import mouse as _ms  # type: ignore
         except Exception:
             _notify_error("Missing Dependency", "pynput is required to record keys.")
             return
@@ -1601,6 +1651,31 @@ def main() -> None:
         else:
             _notify_info("Info", "Start Background to begin listening.")
 
+    def _reset_idle_timer():
+        if _idle_timer["handle"] is not None:
+            try:
+                root.after_cancel(_idle_timer["handle"])
+            except Exception:
+                pass
+            _idle_timer["handle"] = None
+        if not cfg.get("idle_chatter", True):
+            return
+        idle_ms = int(cfg.get("idle_minutes", 45)) * 60 * 1000
+
+        def _fire_idle():
+            _idle_timer["handle"] = None
+            if not cfg.get("idle_chatter", True):
+                return
+            def _speak():
+                from skills import _tts_speak
+                from personality import get_idle_thought
+                _tts_speak(get_idle_thought())
+            threading.Thread(target=_speak, daemon=True).start()
+            # reschedule for next idle period
+            _reset_idle_timer()
+
+        _idle_timer["handle"] = root.after(idle_ms, _fire_idle)
+
     def _start_background():
         try:
             secs = int(seconds.get())
@@ -1617,10 +1692,11 @@ def main() -> None:
                     confirm_fn=_confirm_prompt,
                     on_text=lambda t: root.after(0, lambda: _update_transcript(t)),
                     restart_fn=_do_restart,
-                    on_record_start=lambda: root.after(0, lambda: status_var.set("Recording...")),
-                    on_record_end=lambda: root.after(0, lambda: status_var.set(_hold_label)),
+                    on_record_start=lambda: (root.after(0, lambda: status_var.set("Recording...")), _rpc_set("Recording...")),
+                    on_record_end=lambda: (root.after(0, lambda: status_var.set(_hold_label)), _rpc_set("Listening...")),
                 )
                 status_var.set(_hold_label)
+                _rpc_set("Listening...")
             elif mode.get() == "toggle":
                 _runtime_mode["value"] = "toggle"
                 _toggle_label = f"Listening (toggle {hotkey.get()})"
@@ -1630,10 +1706,11 @@ def main() -> None:
                     confirm_fn=_confirm_prompt,
                     on_text=lambda t: root.after(0, lambda: _update_transcript(t)),
                     restart_fn=_do_restart,
-                    on_record_start=lambda: root.after(0, lambda: status_var.set("Recording...")),
-                    on_record_end=lambda: root.after(0, lambda: status_var.set(_toggle_label)),
+                    on_record_start=lambda: (root.after(0, lambda: status_var.set("Recording...")), _rpc_set("Recording...")),
+                    on_record_end=lambda: (root.after(0, lambda: status_var.set(_toggle_label)), _rpc_set("Listening...")),
                 )
                 status_var.set(_toggle_label)
+                _rpc_set("Listening...")
             elif mode.get() == "wake":
                 _runtime_mode["value"] = "wake"
                 _start_wake_word()
@@ -1645,6 +1722,7 @@ def main() -> None:
             _runtime_mode["value"] = "idle"
             status_var.set("Listener failed to start")
             _show_inline_notice(f"Listener failed to start: {exc}", tone="error")
+        _reset_idle_timer()
 
     def _stop_background():
         listener.stop()
@@ -1774,7 +1852,7 @@ def main() -> None:
     # --- System Tray ---
     def _create_tray_icon():
         try:
-            import pystray  # type: ignore
+            from tray_wrapper import pystray  # type: ignore
             from PIL import Image, ImageDraw  # type: ignore
         except Exception:
             return None
@@ -1798,6 +1876,7 @@ def main() -> None:
             root.after(0, root.withdraw)
 
         def _exit_app(_=None):
+            _rpc_close()
             listener.stop()
             if tray_icon["icon"] is not None:
                 tray_icon["icon"].stop()
@@ -2070,6 +2149,9 @@ def main() -> None:
         "ptt_beep_volume": ptt_beep_volume,
         "tts_output_device": tts_output_device,
         "tts_device_choices": tts_device_choices,
+        "tts_voice": tts_voice,
+        "tts_voice_choices": tts_voice_choices,
+        "personality_mode": personality_mode,
         "theme_var": theme_var,
         "spotify_media": spotify_media,
         "spotify_requires": spotify_requires,
@@ -2177,6 +2259,7 @@ def main() -> None:
 
     def _update_transcript(text: str):
         transcript_var.set(text)
+        _reset_idle_timer()
         transcript_history.append(f"{time.strftime('%H:%M:%S')}  {text}")
         if len(transcript_history) > 10:
             transcript_history.pop(0)
@@ -2206,6 +2289,9 @@ def main() -> None:
         search_engine,
         ptt_beep_volume,
         tts_output_device,
+        tts_voice,
+        personality_mode,
+        premium,
         confirm_actions,
         spotify_media,
         spotify_requires,
@@ -2274,6 +2360,14 @@ def main() -> None:
                 _run_wizard()
             else:
                 _start_background()
+                if cfg.get("idle_chatter", True):
+                    def _do_startup_greeting():
+                        import time as _t
+                        _t.sleep(2.0)
+                        from skills import _tts_speak
+                        from personality import get_startup_greeting
+                        _tts_speak(get_startup_greeting())
+                    threading.Thread(target=_do_startup_greeting, daemon=True).start()
 
         _animate_launch_reveal(_after_reveal)
 

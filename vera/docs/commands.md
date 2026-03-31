@@ -1,6 +1,6 @@
-# IPA Voice Command Reference
+# VERA Voice Command Reference
 
-A full list of everything you can say to IPA. Say **"what can I say"** at any time to see a summary inside the app.
+A full list of everything you can say to VERA. Say **"what can I say"** at any time to see a summary inside the app.
 
 ---
 
@@ -10,7 +10,7 @@ A full list of everything you can say to IPA. Say **"what can I say"** at any ti
 |---|---|
 | `open <app name>` | Opens the app |
 | `launch <app name>` | Same as open |
-| `open that again` | Reopens the last app you opened with IPA |
+| `open that again` | Reopens the last app you opened with VERA |
 | `close <app name>` | Closes the app |
 | `close this` | Closes the currently active window |
 
@@ -60,6 +60,21 @@ A full list of everything you can say to IPA. Say **"what can I say"** at any ti
 
 ---
 
+## Volume
+
+| What to say | What happens |
+|---|---|
+| `mute` / `mute audio` / `sound off` | Mutes system volume |
+| `unmute` / `sound on` / `audio on` | Restores volume to previous level |
+| `volume up` | Increases volume by 10% |
+| `volume down` | Decreases volume by 10% |
+| `set volume <number>` | Sets volume to a specific level (0–100) |
+| `set volume max` | Sets volume to 100% |
+
+> **Examples:** "mute", "set volume 50", "volume up"
+
+---
+
 ## Timers
 
 | What to say | What happens |
@@ -67,8 +82,9 @@ A full list of everything you can say to IPA. Say **"what can I say"** at any ti
 | `set a timer <n> minutes` | Sets a timer for n minutes |
 | `set a timer <n> seconds` | Sets a timer for n seconds |
 | `set a timer <n> hours` | Sets a timer for n hours |
+| `cancel timer` / `stop timer` | Cancels all running timers |
 
-> **Example:** "set a timer 10 minutes"
+> **Examples:** "set a timer 10 minutes", "cancel timer"
 
 ---
 
@@ -78,10 +94,24 @@ A full list of everything you can say to IPA. Say **"what can I say"** at any ti
 |---|---|
 | `note <text>` | Saves a note |
 | `open notes` | Opens your notes |
+| `list notes` / `show notes` | Reads your notes aloud |
 | `delete last note` | Deletes the most recent note |
 | `clear all notes` | Deletes all notes |
 
 > **Example:** "note pick up milk on the way home"
+
+---
+
+## Clipboard
+
+| What to say | What happens |
+|---|---|
+| `read clipboard` | Reads your clipboard aloud |
+| `copy <text>` | Copies text to clipboard |
+| `paste clipboard` / `paste that` / `paste it` | Pastes clipboard contents |
+| `clear clipboard` | Clears the clipboard |
+
+> **Examples:** "copy hello world", "read clipboard", "paste that"
 
 ---
 
@@ -92,13 +122,13 @@ A full list of everything you can say to IPA. Say **"what can I say"** at any ti
 | `type <text>` | Types the text as keyboard input |
 | `send message <text>` | Types the text and presses Enter |
 | `read out <text>` | Reads the text aloud via text-to-speech |
-
-> **Important:** For `type` and `send message` to work, you must have your cursor clicked into a text field first — IPA types into whatever is currently focused on screen.
 | `sleep computer` | Puts your PC to sleep |
 | `restart computer` | Restarts your PC after a 5 second delay |
 | `shut down computer` | Shuts down your PC after a 5 second delay |
-| `restart assistant` | Restarts IPA |
+| `restart assistant` | Restarts VERA |
 
+> **Important:** For `type` and `send message` to work, you must have your cursor clicked into a text field first — VERA types into whatever is currently focused on screen.
+>
 > **Examples:** "type hello world", "send message on my way", "shut down computer"
 
 ---
@@ -107,16 +137,12 @@ A full list of everything you can say to IPA. Say **"what can I say"** at any ti
 
 | What to say | What happens |
 |---|---|
-| `discord <channel> <message>` | Sends a message to a channel |
-| `discord <server> <channel> <message>` | Sends to a specific server's channel |
+| `discord <channel> <message>` | Sends a message to a Discord channel via webhook |
 | `read discord <channel>` | Reads the last message in a channel aloud |
-| `read discord <server> <channel>` | Reads from a specific server's channel |
-| `discord delete <channel>` | Deletes the last message sent to a channel |
-| `discord purge <channel> <n>` | Bulk deletes up to 100 messages |
 
-> Requires Discord webhook setup. See the [Discord Setup Guide](discord.md) for full instructions including multi-server setup.
+> Requires Discord webhook setup in the VERA settings. See the [Discord Setup Guide](discord.md) for details.
 >
-> **Note:** To create a webhook you must have **Administrator** or **Manage Webhooks** permission in the Discord server.
+> **Note:** To create a webhook you must have **Administrator** or **Manage Webhooks** permission in the Discord server. This feature is intended for server owners and administrators.
 
 ---
 
@@ -132,6 +158,20 @@ A full list of everything you can say to IPA. Say **"what can I say"** at any ti
 
 ---
 
+## Memory
+
+| What to say | What happens |
+|---|---|
+| `my name is <name>` | Saves your name so VERA remembers it |
+| `what is my name` | VERA tells you your saved name |
+| `remember <fact>` | Saves a fact for later |
+| `forget <thing>` | Removes a saved fact |
+| `what do you know about me` | VERA reads back everything she remembers |
+
+> **Examples:** "my name is Alex", "remember my birthday is March 5th", "forget my birthday"
+
+---
+
 ## Aliases
 
 | What to say | What happens |
@@ -140,15 +180,25 @@ A full list of everything you can say to IPA. Say **"what can I say"** at any ti
 
 > **Example:** "add alias music for spotify" — after this you can say "open music" to open Spotify.
 >
-> Restart IPA after adding an alias for it to take effect.
+> Restart VERA after adding an alias for it to take effect.
 
 ---
 
 ## Key Binds
 
-Custom phrases mapped to keypresses — configured in the **Actions** tab of the IPA UI.
+Custom phrases mapped to keypresses — configured in the **Actions** tab of the VERA UI.
 
-> **Example:** You could bind "push to talk" to your in-game PTT key so IPA triggers it on command.
+> **Example:** You could bind "push to talk" to your in-game PTT key so VERA triggers it on command.
+
+---
+
+## Conversation
+
+| What to say | What happens |
+|---|---|
+| `I'm tired` / `I'm stressed` / `I'm happy` | VERA responds to your mood |
+| `I'm playing <game>` | Sets your activity so VERA is context-aware |
+| `tell me a joke` / `joke` | VERA tells you a joke |
 
 ---
 

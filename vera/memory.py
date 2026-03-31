@@ -60,10 +60,15 @@ def recall_all() -> dict:
 
 _SESSION: dict = {
     "start_time": time.time(),
-    "mood": None,          # e.g. "tired", "hungry", "frustrated", "good"
-    "activity": None,      # e.g. "star citizen", "working", "gaming"
-    "last_topic": None,    # last thing the user mentioned
+    "mood": None,           # e.g. "tired", "hungry", "frustrated", "good"
+    "mood_time": None,      # time.time() when mood was last set
+    "activity": None,       # e.g. "star citizen", "working", "gaming"
+    "last_topic": None,     # last thing the user mentioned
+    "last_command": None,   # last command type that ran e.g. "open", "search"
+    "last_app": None,       # last app opened by name
     "command_count": 0,
+    "repeat_transcript": None,   # last transcript, for repeat detection
+    "repeat_count": 0,           # how many times same transcript repeated
 }
 
 
@@ -94,7 +99,12 @@ def clear_session() -> None:
     _SESSION.update({
         "start_time": time.time(),
         "mood": None,
+        "mood_time": None,
         "activity": None,
         "last_topic": None,
+        "last_command": None,
+        "last_app": None,
         "command_count": 0,
+        "repeat_transcript": None,
+        "repeat_count": 0,
     })
