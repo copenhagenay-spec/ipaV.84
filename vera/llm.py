@@ -21,6 +21,14 @@ _SYSTEM_DEFAULT = (
     "Never use markdown, bullet points, or any formatting. Just speak naturally like a person would."
 )
 
+_SYSTEM_PROFESSIONAL = (
+    "You are VERA, a professional voice assistant. "
+    "Be direct, concise, and informative. No small talk, no warmth, no filler. "
+    "Answer the question or acknowledge the statement in as few words as possible. "
+    "Keep every response to 1-2 short sentences. "
+    "No markdown, no lists, no formatting. Speak plainly."
+)
+
 _SYSTEM_OFFENSIVE = (
     "You are VERA, a foul-mouthed and sarcastic voice assistant. "
     "You swear freely, give plenty of attitude, and fire back hard at insults. "
@@ -50,7 +58,12 @@ def vera_chat(transcript: str, mode: str = "default", context: dict | None = Non
     except Exception:
         return None
 
-    system = _SYSTEM_OFFENSIVE if mode == "offensive" else _SYSTEM_DEFAULT
+    if mode == "offensive":
+        system = _SYSTEM_OFFENSIVE
+    elif mode == "professional":
+        system = _SYSTEM_PROFESSIONAL
+    else:
+        system = _SYSTEM_DEFAULT
 
     # Append session context so responses feel personal
     if context:

@@ -7,6 +7,7 @@ import difflib
 import threading
 import time
 import os
+import json
 from urllib.parse import quote_plus
 import subprocess
 import webbrowser
@@ -150,7 +151,9 @@ def _kokoro_tts_play(text: str) -> None:
             _log_event(f"TTS_FALLBACK_ERROR: {e2}")
 
 
-def _tts_speak(text: str) -> bool:
+def _tts_speak(text: str, bypass_mute: bool = False) -> bool:
+    if _vera_muted["value"] and not bypass_mute:
+        return False
     try:
         threading.Thread(target=_kokoro_tts_play, args=(text,), daemon=True).start()
         _log_event(f"TTS_SPEAK: {text}")
@@ -477,7 +480,7 @@ def _parse_timer(text: str):
 
 def _media_key(action: str) -> bool:
     try:
-        from pynput import keyboard  # type: ignore
+        from input_wrapper import keyboard  # type: ignore
     except Exception:
         print("Missing dependency: pynput (needed for media keys).")
         return False
@@ -644,6 +647,53 @@ def log_unmatched(raw_text: str) -> None:
             json.dump(entries, f, indent=2, ensure_ascii=False)
 
 
+_GROQ_HANDLED_PATH = os.path.join(os.path.dirname(__file__), "data", "groq_handled.json")
+
+
+def log_groq_handled(raw_text: str) -> None:
+    """Log a transcript that Groq handled conversationally — not a real skill."""
+    import json
+    os.makedirs(os.path.dirname(_GROQ_HANDLED_PATH), exist_ok=True)
+    entries: list = []
+    if os.path.exists(_GROQ_HANDLED_PATH):
+        try:
+            with open(_GROQ_HANDLED_PATH, "r", encoding="utf-8") as f:
+                entries = json.load(f)
+            if not isinstance(entries, list):
+                entries = []
+        except Exception:
+            entries = []
+    entry = raw_text.strip()
+    if entry and entry not in entries:
+        entries.append(entry)
+        with open(_GROQ_HANDLED_PATH, "w", encoding="utf-8") as f:
+            json.dump(entries, f, indent=2, ensure_ascii=False)
+
+
+def load_groq_handled() -> list:
+    """Return the list of Groq-handled transcripts."""
+    import json
+    if not os.path.exists(_GROQ_HANDLED_PATH):
+        return []
+    try:
+        with open(_GROQ_HANDLED_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+    return []
+
+
+def dismiss_groq_handled(raw_text: str) -> None:
+    """Remove a single entry from the groq handled list."""
+    import json
+    entries = load_groq_handled()
+    entries = [e for e in entries if e != raw_text]
+    with open(_GROQ_HANDLED_PATH, "w", encoding="utf-8") as f:
+        json.dump(entries, f, indent=2, ensure_ascii=False)
+
+
 def load_unmatched() -> list:
     """Return the list of unmatched transcripts."""
     import json
@@ -709,7 +759,7 @@ _CONVERSATIONAL_PREFIX = re.compile(
     r"do me a favor and\s+|do me a favour and\s+)"
 )
 
-_LEADING_NOISE = re.compile(r"^(the|a|an|i|hey|so|well|okay|ok)\s+")
+_LEADING_NOISE = re.compile(r"^(the|a|an|i|hey|so|well)\s+")
 _TRAILING_NOISE = re.compile(r"\s+(please|now|for me|for me please|for me thanks|thanks|thank you|real quick)\s*$")
 
 _NOISE_WORDS = {"the", "a", "an", "and", "of", "to", "in", "is", "it", "i", "uh", "um", "hmm"}
@@ -803,6 +853,32 @@ def _add_alias(alias: str, target: str) -> bool:
 
 _last_app: dict = {"name": None, "command": None}
 _saved_volume: dict = {"level": None}  # stores volume before mute so unmute can restore it
+_vera_muted: dict = {"value": False, "status_fn": None}  # mute state + optional UI callback
+_groq_flash_fn = {"fn": None}  # callback to flash status bar when Groq responds
+
+
+def set_groq_flash_callback(fn) -> None:
+    """Register a callback to flash the status bar when Groq handles a response."""
+    _groq_flash_fn["fn"] = fn
+
+
+def trigger_groq_flash() -> None:
+    """Fire the groq flash callback if registered."""
+    fn = _groq_flash_fn.get("fn")
+    if fn:
+        try:
+            fn()
+        except Exception:
+            pass
+
+
+def set_mute_status_callback(fn) -> None:
+    """Register a callback to update the UI status bar when mute state changes."""
+    _vera_muted["status_fn"] = fn
+
+
+def is_muted() -> bool:
+    return bool(_vera_muted["value"])
 
 
 _CLOSE_OVERRIDES = {
@@ -1193,9 +1269,9 @@ def _resolve_key(raw: str):
     if raw.startswith("<") and raw.endswith(">"):
         raw = raw[1:-1].strip()
     if raw in ("x1", "x2"):
-        from pynput import mouse as _mouse  # type: ignore
+        from input_wrapper import mouse as _mouse  # type: ignore
         return ("mouse", _mouse.Button.x1 if raw == "x1" else _mouse.Button.x2)
-    from pynput import keyboard  # type: ignore
+    from input_wrapper import keyboard  # type: ignore
     if len(raw) == 1:
         return ("key", keyboard.KeyCode.from_char(raw))
     obj = getattr(keyboard.Key, raw, None)
@@ -1210,8 +1286,8 @@ _MODIFIER_NAMES = {"ctrl", "alt", "shift", "cmd"}
 def _press_key(key: str, count: int = 1) -> bool:
     """Press a single key or combo (e.g. 'alt+n', 'ctrl+shift+f', 'x1')."""
     try:
-        from pynput import keyboard as _kb  # type: ignore
-        from pynput import mouse as _mouse  # type: ignore
+        from input_wrapper import keyboard as _kb  # type: ignore
+        from input_wrapper import mouse as _mouse  # type: ignore
 
         parts = [p.strip().lower() for p in key.split("+")]
         modifiers = []
@@ -1271,7 +1347,7 @@ def _run_macro(sequence: str, count: int = 1) -> bool:
 
 def _send_message(text: str) -> bool:
     try:
-        from pynput.keyboard import Controller, Key  # type: ignore
+        from input_wrapper import KbController as Controller, Key  # type: ignore
         time.sleep(0.3)
         ctl = Controller()
         ctl.type(text)
@@ -1287,7 +1363,7 @@ def _send_message(text: str) -> bool:
 
 def _type_text(text: str) -> bool:
     try:
-        from pynput.keyboard import Controller  # type: ignore
+        from input_wrapper import KbController as Controller  # type: ignore
         time.sleep(0.3)
         Controller().type(text)
         _log_event(f"TYPE_TEXT: {text}")
@@ -1771,7 +1847,7 @@ def _ih_set_name(m, t, allow_prompt, confirm_fn, restart_fn):
 
 
 # --- Memory: ask name ---
-@_intent(879, r"\b(what is my name|do you know my name|what('s| is) my name)\b")
+@_intent(879, r"\b(what is my name|do you know my name|what(?:s| is) my name)\b")
 def _ih_ask_name(m, t, allow_prompt, confirm_fn, restart_fn):
     from memory import recall as _recall
     name = _recall("name")
@@ -1783,7 +1859,7 @@ def _ih_ask_name(m, t, allow_prompt, confirm_fn, restart_fn):
 
 
 # --- Memory: remember fact ---
-@_intent(875, r"\b(remember|vera remember|don't forget)\s+(?:that\s+)?(.+)$")
+@_intent(875, r"\b(remember|vera remember|don'?t forget)\s+(?:that\s+)?(.+)$")
 def _ih_remember(m, t, allow_prompt, confirm_fn, restart_fn):
     from memory import remember as _remember
     fact = m.group(2).strip()
@@ -1795,7 +1871,8 @@ def _ih_remember(m, t, allow_prompt, confirm_fn, restart_fn):
         _remember(key, value)
         _tts_speak(f"Got it, remembered that your {name_match.group(1)} is {value}")
     else:
-        _remember(f"fact_{len(fact)}", fact)
+        key = f"fact_{int(time.time())}"
+        _remember(key, fact)
         _tts_speak("Got it, I'll remember that")
     return True
 
@@ -1824,6 +1901,184 @@ def _ih_recall_all(m, t, allow_prompt, confirm_fn, restart_fn):
     for key, value in data.items():
         parts.append(f"{key.replace('_', ' ')}: {value}")
     _tts_speak("Here's what I know. " + ", ".join(parts))
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Reminders
+# ---------------------------------------------------------------------------
+
+_REMINDERS_PATH = os.path.join(os.path.dirname(__file__), "data", "reminders.json")
+
+
+def _load_reminders() -> list:
+    try:
+        with open(_REMINDERS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def _save_reminders(reminders: list) -> None:
+    try:
+        os.makedirs(os.path.dirname(_REMINDERS_PATH), exist_ok=True)
+        with open(_REMINDERS_PATH, "w", encoding="utf-8") as f:
+            json.dump(reminders, f)
+    except Exception:
+        pass
+
+
+def check_due_reminders() -> list:
+    """Return messages for any due reminders and remove them from storage."""
+    reminders = _load_reminders()
+    now = time.time()
+    due = [r["msg"] for r in reminders if r["ts"] <= now]
+    if due:
+        _save_reminders([r for r in reminders if r["ts"] > now])
+    return due
+
+
+def _parse_reminder_time(s: str):
+    """Parse time strings into a Unix timestamp. Returns None on failure."""
+    import datetime
+    s = s.strip().lower()
+    # strip leading "in/for/at" prefix so bare "two minutes" also works
+    s_bare = re.sub(r"^(in|for|at)\s+", "", s).strip()
+    now = datetime.datetime.now()
+
+    word_map = {
+        "a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+        "fifteen": 15, "twenty": 20, "thirty": 30, "forty": 40,
+        "forty five": 45, "fortyfive": 45, "sixty": 60, "half": 30,
+    }
+
+    # "X minutes/hours" (with or without in/for prefix)
+    m = re.match(
+        r"(a|an|\d+|one|two|three|four|five|six|seven|eight|nine|ten|"
+        r"fifteen|twenty|thirty|forty|forty five|fortyfive|sixty|half)\s+"
+        r"(minute|minutes|min|mins|hour|hours|hr|hrs)",
+        s_bare,
+    )
+    if m:
+        qty_str = m.group(1)
+        unit = m.group(2)
+        qty = word_map.get(qty_str)
+        if qty is None:
+            try:
+                qty = int(qty_str)
+            except Exception:
+                return None
+        if "hour" in unit or "hr" in unit:
+            return (now + datetime.timedelta(hours=qty)).timestamp()
+        return (now + datetime.timedelta(minutes=qty)).timestamp()
+
+    # "H:MM am/pm" or "H am/pm" or "H" (with or without "at" prefix)
+    # Note: preprocess strips colons, so "9:30pm" arrives as "930pm"
+    # Handle both colon and no-colon forms
+    m = re.match(r"(\d{1,2})(?::?(\d{2}))?\s*(am|pm)?$", s_bare)
+    if m:
+        hour = int(m.group(1))
+        raw_mins = m.group(2)
+        # If no colon was present (preprocess stripped it), only treat as HMM if 3-4 digits total
+        if raw_mins and not re.search(r":", s):
+            # e.g. "930pm" → hour=9, raw_mins="30"
+            minute = int(raw_mins)
+        elif raw_mins:
+            minute = int(raw_mins)
+        else:
+            minute = 0
+        meridiem = m.group(3)
+        if meridiem == "pm" and hour != 12:
+            hour += 12
+        elif meridiem == "am" and hour == 12:
+            hour = 0
+        target = now.replace(hour=hour % 24, minute=minute, second=0, microsecond=0)
+        if target <= now:
+            if meridiem is None and hour < 12:
+                target = target.replace(hour=hour + 12)
+            if target <= now:
+                target += datetime.timedelta(days=1)
+        return target.timestamp()
+
+    return None
+
+
+def _format_reminder_time(ts: float) -> str:
+    import datetime
+    dt = datetime.datetime.fromtimestamp(ts)
+    now = datetime.datetime.now()
+    time_str = dt.strftime("%I:%M %p").lstrip("0")
+    return f"today at {time_str}" if dt.date() == now.date() else f"tomorrow at {time_str}"
+
+
+# --- Set reminder ---
+@_intent(873, r"\b(?:remind me|set (?:a )?reminder)\b")
+def _ih_set_reminder(m, t, allow_prompt, confirm_fn, restart_fn):
+    time_str = None
+    msg = "reminder"
+
+    # Pattern 1: [time] to [message]  e.g. "remind me in 5 minutes to take meds"
+    m1 = re.search(r"\b(?:remind me|set (?:a )?reminder)\s+(?:for\s+)?(.+?)\s+to\s+(.+)$", t)
+    if m1:
+        ts = _parse_reminder_time(m1.group(1).strip())
+        if ts is not None:
+            time_str, msg = m1.group(1).strip(), m1.group(2).strip()
+
+    # Pattern 2: to [message] [time]  e.g. "set a reminder to take meds in 5 minutes"
+    if time_str is None:
+        m2 = re.search(r"\b(?:remind me|set (?:a )?reminder)\s+to\s+(.+?)\s+((?:in|for|at)\s+.+)$", t)
+        if m2:
+            ts = _parse_reminder_time(m2.group(2).strip())
+            if ts is not None:
+                msg, time_str = m2.group(1).strip(), m2.group(2).strip()
+
+    # Pattern 3: bare time, no message  e.g. "set a reminder for two minutes"
+    if time_str is None:
+        m3 = re.search(r"\b(?:remind me|set (?:a )?reminder)\s+(?:for\s+|in\s+|at\s+)?(.+)$", t)
+        if m3:
+            ts = _parse_reminder_time(m3.group(1).strip())
+            if ts is not None:
+                time_str = m3.group(1).strip()
+
+    if time_str is None:
+        _tts_speak("I didn't catch the time. Try 'remind me in 30 minutes to...' or 'remind me at 9pm to...'")
+        return True
+
+    reminders = _load_reminders()
+    reminders.append({"ts": ts, "msg": msg})
+    _save_reminders(reminders)
+    label = f": {msg}" if msg != "reminder" else ""
+    _tts_speak(f"Reminder set for {_format_reminder_time(ts)}{label}")
+    return True
+
+
+# --- Cancel all reminders ---
+@_intent(871, r"\b(?:cancel all reminders|clear all reminders|delete all reminders|cancel my reminders|remove all reminders)\b")
+def _ih_cancel_all_reminders(m, t, allow_prompt, confirm_fn, restart_fn):
+    reminders = _load_reminders()
+    count = len([r for r in reminders if r["ts"] > time.time()])
+    _save_reminders([])
+    if count == 0:
+        _tts_speak("No reminders to cancel.")
+    else:
+        _tts_speak(f"Cleared {count} reminder{'s' if count > 1 else ''}.")
+    return True
+
+
+# --- List reminders ---
+@_intent(872, r"\b(?:what are my reminders|list my reminders|show my reminders|do i have any reminders|my reminders)\b")
+def _ih_list_reminders(m, t, allow_prompt, confirm_fn, restart_fn):
+    import datetime as _dt
+    reminders = _load_reminders()
+    reminders = [r for r in reminders if r["ts"] > time.time()]
+    if not reminders:
+        _tts_speak("No reminders set.")
+        return True
+    reminders.sort(key=lambda r: r["ts"])
+    parts = [f"{_format_reminder_time(r['ts'])}: {r['msg']}" for r in reminders]
+    count = len(parts)
+    _tts_speak(f"You have {count} reminder{'s' if count > 1 else ''}. " + ". ".join(parts))
     return True
 
 
@@ -2308,7 +2563,7 @@ def _ih_clipboard_clear(m, t, allow_prompt, confirm_fn, restart_fn):
 @_intent(250, r"\b(paste\s+clipboard|paste\s+that|paste\s+it)\b")
 def _ih_clipboard_paste(m, t, allow_prompt, confirm_fn, restart_fn):
     try:
-        from pynput.keyboard import Controller as _KbCtrl, Key as _Key
+        from input_wrapper import KbController as _KbCtrl, Key as _Key
         _kb = _KbCtrl()
         _kb.press(_Key.ctrl)
         _kb.press('v')
@@ -2406,6 +2661,170 @@ def _ih_joke(m, t, allow_prompt, confirm_fn, restart_fn):
     return True
 
 
+# --- Birthday ---
+_MONTH_MAP = {
+    "january": 1, "february": 2, "march": 3, "april": 4,
+    "may": 5, "june": 6, "july": 7, "august": 8,
+    "september": 9, "october": 10, "november": 11, "december": 12,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+@_intent(877, r"\bmy birthday is\s+(.+)$")
+def _ih_set_birthday(m, t, allow_prompt, confirm_fn, restart_fn):
+    import re as _re
+    raw = m.group(1).strip()
+    # Try to parse month and day from the phrase
+    month = None
+    day = None
+
+    # Match patterns like "october 15", "the 15th of october", "15th october"
+    month_match = _re.search(r"(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)", raw)
+    day_match = _re.search(r"\b(\d{1,2})(st|nd|rd|th)?\b", raw)
+
+    if month_match:
+        month = _MONTH_MAP.get(month_match.group(1).lower())
+    if day_match:
+        day = int(day_match.group(1))
+
+    if not month or not day or not (1 <= day <= 31):
+        _tts_speak("I couldn't quite catch that. Try saying something like 'my birthday is October 15th'.")
+        return True
+
+    # Save to config
+    import json as _json
+    cfg = load_config()
+    cfg["birthday_month"] = month
+    cfg["birthday_day"] = day
+    from config import save_config as _save
+    _save(cfg)
+
+    month_name = list(_MONTH_MAP.keys())[list(_MONTH_MAP.values()).index(month)].capitalize()
+    _tts_speak(f"Got it, I'll remember your birthday is {month_name} {day}.")
+    return True
+
+
+# --- Mute / Unmute ---
+@_intent(950, r"\b(mute|be quiet|shut up vera|silence|go quiet|stop talking)\b")
+def _ih_mute(m, t, allow_prompt, confirm_fn, restart_fn):
+    _vera_muted["value"] = True
+    fn = _vera_muted.get("status_fn")
+    if fn:
+        fn("Muted")
+    _log_event("VERA_MUTED")
+    return True
+
+
+@_intent(951, r"\b(unmute|you can talk|start talking|come back|wake up vera|i can hear you now|okay vera|ok vera|vera come back|vera unmute)\b")
+def _ih_unmute(m, t, allow_prompt, confirm_fn, restart_fn):
+    _vera_muted["value"] = False
+    fn = _vera_muted.get("status_fn")
+    if fn:
+        fn(None)  # None tells assistant.py to restore the real status label
+    _tts_speak("I'm back.", bypass_mute=True)
+    _log_event("VERA_UNMUTED")
+    return True
+
+
+# --- News ---
+_NEWS_FEEDS = {
+    "BBC":         "https://feeds.bbci.co.uk/news/rss.xml",
+    "Reuters":     "https://feeds.reuters.com/reuters/topNews",
+    "NPR":         "https://feeds.npr.org/1001/rss.xml",
+    "AP News":     "https://rsshub.app/apnews/topics/apf-topnews",
+    "The Guardian":"https://www.theguardian.com/world/rss",
+    "Al Jazeera":  "https://www.aljazeera.com/xml/rss/all.xml",
+}
+
+@_intent(815, r"\b(give me the news|read the news|whats?(?:\s+(?:in|the))*\s+news(?: today)?|what is(?:\s+(?:in|the))*\s+news(?: today)?|news briefing|top headlines|headlines)\b")
+def _ih_news(m, t, allow_prompt, confirm_fn, restart_fn):
+    import urllib.request as _ur
+    import urllib.error as _ue
+    import xml.etree.ElementTree as _xml
+
+    cfg = load_config()
+    source = cfg.get("news_source", "BBC")
+    url = _NEWS_FEEDS.get(source, _NEWS_FEEDS["BBC"])
+
+    try:
+        req = _ur.Request(url, headers={"User-Agent": "curl/7.0"})
+        with _ur.urlopen(req, timeout=8) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+
+        root = _xml.fromstring(raw)
+        # RSS titles are in channel/item/title
+        items = root.findall(".//item/title")
+        if not items:
+            _tts_speak("Couldn't find any headlines right now.")
+            return True
+
+        headlines = []
+        for item in items[:5]:
+            text = (item.text or "").strip()
+            # Strip CDATA markers if present
+            text = text.replace("<![CDATA[", "").replace("]]>", "").strip()
+            if text:
+                headlines.append(text)
+
+        if not headlines:
+            _tts_speak("No headlines available right now.")
+            return True
+
+        intro = f"Here are the top headlines from {source}. "
+        body = ". ".join(f"{i+1}. {h}" for i, h in enumerate(headlines)) + "."
+        _tts_speak(intro + body)
+
+    except _ue.URLError:
+        _tts_speak("I can't reach the news right now. Check your connection.")
+    except Exception:
+        _tts_speak("Had trouble pulling the news. Try again in a moment.")
+
+    return True
+
+
+# --- Weather ---
+@_intent(810, r"\b(what(?:s| is) the weather(?: like)?(?:\s+(?:in|for|at)\s+(.+))?|weather(?: in| for| at)?\s+(.+)?|how(?:s| is) the weather(?: (?:in|for|at)\s+(.+))?)\b")
+def _ih_weather(m, t, allow_prompt, confirm_fn, restart_fn):
+    import urllib.request as _ur
+    import urllib.error as _ue
+
+    # Extract city from whichever capture group matched
+    city = None
+    for g in m.groups()[1:]:
+        if g and g.strip():
+            city = g.strip()
+            break
+
+    if not city:
+        # No city — ask the user
+        _tts_speak("What city do you want the weather for?")
+        return True
+
+    try:
+        import json as _json
+        url = f"https://wttr.in/{quote_plus(city)}?format=j1"
+        req = _ur.Request(url, headers={"User-Agent": "curl/7.0"})
+        with _ur.urlopen(req, timeout=6) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+
+        cur = data["current_condition"][0]
+        desc = cur["weatherDesc"][0]["value"]
+        temp_f = cur["temp_F"]
+        feels_f = cur["FeelsLikeF"]
+        humidity = cur["humidity"]
+
+        _tts_speak(
+            f"Weather in {city}: {desc}, {temp_f} degrees, feels like {feels_f}, humidity {humidity} percent."
+        )
+
+    except _ue.URLError:
+        _tts_speak("I can't reach the weather service right now. Check your connection.")
+    except Exception:
+        _tts_speak(f"Couldn't get the weather for {city}.")
+
+    return True
+
+
 # Pre-sort the registry once at import time for fast dispatch
 _INTENT_REGISTRY.sort(key=lambda x: -x[0])
 
@@ -2441,5 +2860,6 @@ def handle_transcript(text: str, allow_prompt: bool = True, confirm_fn=None, res
     if handle_social(t, _tts_speak):
         return True
 
+    log_unmatched(t)
     _tts_speak(get_fallback())
     return False

@@ -1,31 +1,19 @@
 # Changelog
 
-## 0.95.1
-- Fixed crash on startup — `input_wrapper` and `tray_wrapper` dev-only modules replaced with `pynput` and `pystray` in public build
+## 0.96
 
-## 0.95
-- Premium tier foundation — `license.py` gate controls access to premium features; `premium` flag persists through config saves
-- Offensive personality mode (Premium) — alternate response pools across all response types: confirmations, wake acks, fallbacks, failures, and social interactions; unlocked via premium license
-- Offensive startup greetings — VERA greets differently at startup based on active personality mode
-- LLM-powered personality — `llm.py` hooks VERA's conversational responses into Groq (llama-3.1-8b-instant) for dynamic, context-aware replies; falls back to pools if key not set or call fails; uses existing Groq API key from settings
-- Personality mode selector — Settings UI shows a mode dropdown (Default / Offensive); locked with a message when premium is not active
-- TTS voice selection — dropdown in Settings to choose from 11 Kokoro voices; takes effect immediately
-- Conversational prefix stripping — natural phrases like "can you", "could you", "hey vera" stripped before command matching so commands work conversationally
-- Expanded social patterns — VERA now responds to: direct insults, "fuck you", "shut up", "don't talk to me like that", "what did you say", "huh", "sounds good", "pretty good", "dude", "yes/yeah", and more
-- Insult comebacks — in offensive mode VERA fires back at insults instead of giving polite responses
-- Discord community button — Join the Discord button on the Home tab
-- Session context in responses — mood, activity, last app, and name now influence personality responses
-- Repeat detection — VERA notices when the same phrase is said multiple times without success and suggests rephrasing
-- `premium` key preserved on config save — no longer wiped when settings are saved from the UI
+**New Features:**
+- Professional personality mode (free tier) — clean, direct responses with no fluff or warmth; selectable in Settings alongside Default and Offensive
+- Scheduled reminders — set reminders by voice ("remind me in 30 minutes to take my meds", "set a reminder to call mom at 9pm"); list and cancel by voice; reminders survive restarts and fire even when muted
+- AI response indicator — status bar flashes "AI response" for 2 seconds whenever Groq handles a response so you always know when the LLM is talking vs a real skill
+- VERA now knows your name in AI conversations — stored name is injected into every Groq call so responses feel personal
 
-## 0.90.1.1
-- "close vera" now kills only the VERA process — PID written to `data/vera.pid` on startup; targeted kill instead of matching by exe name
-
-## 0.90.0
-- UI overhaul — inline notifications replace popups, smooth scrolling, unsaved changes indicator, loading overlay, styled listboxes (thepyro-dev)
-- Inline key recording overlay — record hotkeys and hold keys directly inside the window instead of a separate dialog
-- Fixed hold-to-talk with Caps Lock — releasing the key no longer restarts recording due to synthetic keybd_event from caps lock state restore
-- New logo, tray icon, and app icon — refreshed visual design
+**Bug Fixes:**
+- "What's my name", "what's the weather", and "don't forget" no longer fall through to Groq — apostrophe stripping in the audio pipeline was breaking intent matching for these phrases
+- Remembered facts no longer silently overwrite each other — was using string length as the storage key, causing collisions
+- AI response flash was being immediately overwritten by the listening status — now displays correctly after speech completes
+- Voice profile changes no longer break Groq conversational integration
+- Reminders now match natural phrasing in both word orders — time-first and message-first both work
 
 ## 0.89.0
 - Bug report now submits to Discord automatically — creates a private ticket with description, VERA version, and full log zip attached

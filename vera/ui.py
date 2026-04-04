@@ -166,7 +166,12 @@ def install_smooth_scrolling(root, *scrollables) -> None:
         return None
 
     def _on_mousewheel(event):
+        import tkinter as _tk_chk
         widget = root.winfo_containing(event.x_root, event.y_root)
+        # If hovering over a Listbox, let it scroll itself — don't hijack
+        if isinstance(widget, _tk_chk.Listbox):
+            widget.yview_scroll(-1 * (event.delta // 120), "units")
+            return "break"
         scrollable = _find_scrollable(widget)
         if scrollable is None:
             return
@@ -448,16 +453,15 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
         ctk.CTkOptionMenu(
             personality_row,
             variable=personality_mode,
-            values=["default", "offensive"],
-            width=140,
+            values=["default", "professional", "offensive"],
+            width=160,
         ).pack(side="left")
     else:
         ctk.CTkOptionMenu(
             personality_row,
             variable=personality_mode,
-            values=["default", "offensive"],
-            width=140,
-            state="disabled",
+            values=["default", "professional"],
+            width=160,
         ).pack(side="left")
         ctk.CTkLabel(
             personality_row,
@@ -483,6 +487,45 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     ctk.CTkLabel(spot_kw_row, text="Spotify keywords").pack(side="left")
     ctk.CTkEntry(spot_kw_row, textvariable=spotify_keywords,
                  width=240).pack(side="left", padx=(10, 0))
+
+    # -- News --
+    _section_header(settings_scroll, "News",
+                    "Choose your preferred news source for 'give me the news'.")
+    news_source = state["news_source"]
+    news_card = _card(settings_scroll)
+    news_row = _card_row(news_card)
+    ctk.CTkLabel(news_row, text="Source", width=120).pack(side="left")
+    ctk.CTkOptionMenu(
+        news_row,
+        variable=news_source,
+        values=["BBC", "Reuters", "NPR", "AP News", "The Guardian", "Al Jazeera"],
+        width=160,
+    ).pack(side="left")
+
+    # -- Birthday --
+    _section_header(settings_scroll, "Birthday",
+                    "VERA will wish you happy birthday on startup. "
+                    "You can also say 'my birthday is October 15th'.")
+    birthday_month = state["birthday_month"]
+    birthday_day = state["birthday_day"]
+    bday_card = _card(settings_scroll)
+    bday_row = _card_row(bday_card)
+    ctk.CTkLabel(bday_row, text="Month", width=80).pack(side="left")
+    ctk.CTkOptionMenu(
+        bday_row,
+        variable=birthday_month,
+        values=["", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
+        width=80,
+    ).pack(side="left", padx=(0, 16))
+    ctk.CTkLabel(bday_row, text="Day", width=40).pack(side="left")
+    ctk.CTkOptionMenu(
+        bday_row,
+        variable=birthday_day,
+        values=[""] + [str(d) for d in range(1, 32)],
+        width=80,
+    ).pack(side="left")
+    ctk.CTkLabel(bday_row, text="  Leave blank to disable",
+                 font=FONT_HELP, text_color=COLOR_HELP).pack(side="left", padx=(12, 0))
 
     # -- Utilities --
     _section_header(settings_scroll, "Utilities")
@@ -516,8 +559,31 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
                     "Say 'open <app name>' to launch an app. "
                     "Add them manually or import from Steam.")
 
-    apps_textbox = ctk.CTkTextbox(apps_scroll, height=140, corner_radius=8)
-    apps_textbox.pack(fill="x", padx=PAD_OUTER, pady=4)
+    import tkinter as _tk_apps
+    apps_frame = ctk.CTkFrame(apps_scroll, corner_radius=8)
+    apps_frame.pack(fill="x", padx=PAD_OUTER, pady=(2, 2))
+    apps_textbox = _tk_apps.Listbox(
+        apps_frame,
+        height=6,
+        selectmode="single",
+        activestyle="none",
+        exportselection=False,
+        bg="#262626",
+        fg="white",
+        selectbackground="#2563eb",
+        selectforeground="white",
+        relief="flat",
+        borderwidth=0,
+        highlightthickness=1,
+        highlightbackground="#404040",
+        highlightcolor="#2563eb",
+        font=("Segoe UI Semibold", 11),
+    )
+    apps_textbox.pack(fill="x", padx=8, pady=8)
+    def _apps_scroll(e):
+        apps_textbox.yview_scroll(-1 * (e.delta // 120), "units")
+        return "break"
+    apps_textbox.bind("<MouseWheel>", _apps_scroll)
 
     app_input_card = _card(apps_scroll)
 
@@ -540,16 +606,39 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
                    width=110).pack(side="left", padx=4)
     _secondary_btn(app_btns, text="Import Steam", command=_import_steam,
                    width=110).pack(side="left", padx=4)
-    _danger_btn(app_btns, text="Remove Last", command=_remove_app,
-                width=110).pack(side="right", padx=4)
+    _danger_btn(app_btns, text="Remove Selected", command=_remove_app,
+                width=130).pack(side="right", padx=4)
 
     # -- App Aliases --
     _section_header(apps_scroll, "App Aliases",
                     "Create shortcuts \u2014 say the alias to launch "
                     "the target app.")
 
-    aliases_textbox = ctk.CTkTextbox(apps_scroll, height=90, corner_radius=8)
-    aliases_textbox.pack(fill="x", padx=PAD_OUTER, pady=4)
+    import tkinter as _tk_alias
+    aliases_frame = ctk.CTkFrame(apps_scroll, corner_radius=8)
+    aliases_frame.pack(fill="x", padx=PAD_OUTER, pady=(2, 2))
+    aliases_textbox = _tk_alias.Listbox(
+        aliases_frame,
+        height=4,
+        selectmode="single",
+        activestyle="none",
+        exportselection=False,
+        bg="#262626",
+        fg="white",
+        selectbackground="#2563eb",
+        selectforeground="white",
+        relief="flat",
+        borderwidth=0,
+        highlightthickness=1,
+        highlightbackground="#404040",
+        highlightcolor="#2563eb",
+        font=("Segoe UI Semibold", 11),
+    )
+    aliases_textbox.pack(fill="x", padx=8, pady=8)
+    def _alias_scroll(e):
+        aliases_textbox.yview_scroll(-1 * (e.delta // 120), "units")
+        return "break"
+    aliases_textbox.bind("<MouseWheel>", _alias_scroll)
 
     alias_input_card = _card(apps_scroll)
 
@@ -568,8 +657,8 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     alias_btns = _btn_row(apps_scroll)
     _primary_btn(alias_btns, text="Add Alias", command=_add_alias,
                  width=110).pack(side="left", padx=4)
-    _danger_btn(alias_btns, text="Remove Last", command=_remove_alias,
-                width=110).pack(side="right", padx=4)
+    _danger_btn(alias_btns, text="Remove Selected", command=_remove_alias,
+                width=130).pack(side="right", padx=4)
 
     # =====================================================================
     # INTEGRATIONS TAB
@@ -851,7 +940,7 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     # =====================================================================
     # TRAINING TAB
     # =====================================================================
-    from skills import load_unmatched, save_user_mishear, dismiss_unmatched
+    from skills import load_unmatched, save_user_mishear, dismiss_unmatched, load_groq_handled, dismiss_groq_handled
 
     training_scroll = _make_scrollable(tabview.tab("Training"))
 
@@ -939,6 +1028,75 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
     ctk.CTkLabel(training_scroll,
                  text="Saved corrections take effect immediately — no restart needed.",
                  font=FONT_HELP, text_color=COLOR_HELP).pack(anchor="w", padx=PAD_OUTER, pady=(4, 0))
+
+    # -- Groq Handled --
+    _section_header(training_scroll, "Groq Handled",
+                    "Things VERA answered via AI that could become real skills. "
+                    "Use these to spot patterns worth adding as commands.")
+
+    groq_list_frame = ctk.CTkFrame(training_scroll, corner_radius=8)
+    groq_list_frame.pack(fill="x", padx=PAD_OUTER, pady=(2, 4))
+
+    groq_listbox = tk.Listbox(
+        groq_list_frame,
+        height=8,
+        selectmode="single",
+        activestyle="none",
+        exportselection=False,
+        bg="#262626",
+        fg="white",
+        selectbackground="#2563eb",
+        selectforeground="white",
+        relief="flat",
+        borderwidth=0,
+        highlightthickness=1,
+        highlightbackground="#404040",
+        highlightcolor="#2563eb",
+        font=("Segoe UI Semibold", 11),
+    )
+    groq_listbox.pack(fill="x", padx=8, pady=8)
+    groq_listbox.bind("<MouseWheel>", lambda e: (groq_listbox.yview_scroll(-1 * (e.delta // 120), "units"), "break")[1])
+
+    _selected_groq = [None]
+
+    def _refresh_groq_handled():
+        entries = load_groq_handled()
+        groq_listbox.delete(0, "end")
+        for e in entries:
+            groq_listbox.insert("end", e)
+
+    _refresh_groq_handled()
+
+    def _on_groq_select(event=None):
+        sel = groq_listbox.curselection()
+        if sel:
+            _selected_groq[0] = groq_listbox.get(sel[0])
+
+    groq_listbox.bind("<<ListboxSelect>>", _on_groq_select)
+
+    def _dismiss_groq():
+        entry = _selected_groq[0]
+        if not entry:
+            return
+        dismiss_groq_handled(entry)
+        _selected_groq[0] = None
+        _refresh_groq_handled()
+
+    def _clear_all_groq():
+        import json, os as _os
+        from skills import _GROQ_HANDLED_PATH
+        try:
+            with open(_GROQ_HANDLED_PATH, "w", encoding="utf-8") as f:
+                json.dump([], f)
+        except Exception:
+            pass
+        _selected_groq[0] = None
+        _refresh_groq_handled()
+
+    groq_btn_row = _btn_row(training_scroll)
+    _secondary_btn(groq_btn_row, text="Dismiss Selected", command=_dismiss_groq, width=140).pack(side="left", padx=4)
+    _danger_btn(groq_btn_row, text="Clear All", command=_clear_all_groq, width=100).pack(side="left", padx=4)
+    _muted_btn(groq_btn_row, text="Refresh", command=_refresh_groq_handled, width=90).pack(side="left", padx=4)
 
     # =====================================================================
     # STATUS BAR  (persistent, outside tabview)

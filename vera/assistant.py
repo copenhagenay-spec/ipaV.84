@@ -90,7 +90,7 @@ class BackgroundListener:
         ).start()
 
     def start_toggle(self, toggle_key: str, model_path: str, confirm_fn, on_text=None, restart_fn=None, on_record_start=None, on_record_end=None):
-        from pynput import keyboard  # type: ignore
+        from input_wrapper import keyboard  # type: ignore
 
         def _record():
             if on_record_start:
@@ -126,7 +126,7 @@ class BackgroundListener:
         self.listener.start()
 
     def start_hold(self, hold_key: str, model_path: str, confirm_fn, on_text=None, restart_fn=None, on_record_start=None, on_record_end=None):
-        from pynput import keyboard  # type: ignore
+        from input_wrapper import keyboard  # type: ignore
 
         def _record():
             if on_record_start:
@@ -140,7 +140,7 @@ class BackgroundListener:
             self.stop_event.clear()
 
         if _is_mouse_button(hold_key):
-            from pynput import mouse  # type: ignore
+            from input_wrapper import mouse  # type: ignore
             button_obj = _resolve_mouse_button(hold_key, mouse)
             if not button_obj:
                 raise ValueError("Invalid mouse button")
@@ -466,6 +466,9 @@ def main() -> None:
     spotify_media = tk.BooleanVar(value=bool(cfg.get("spotify_media", False)))
     spotify_requires = tk.BooleanVar(value=bool(cfg.get("spotify_requires_keyword", False)))
     spotify_keywords = tk.StringVar(value=str(cfg.get("spotify_keywords", "spotify")))
+    news_source = tk.StringVar(value=cfg.get("news_source", "BBC"))
+    birthday_month = tk.StringVar(value=str(cfg.get("birthday_month", "")))
+    birthday_day = tk.StringVar(value=str(cfg.get("birthday_day", "")))
 
     actions = cfg.get("actions", [])
     if not isinstance(actions, list):
@@ -652,6 +655,9 @@ def main() -> None:
             "spotify_media": bool(spotify_media.get()),
             "spotify_requires_keyword": bool(spotify_requires.get()),
             "spotify_keywords": spotify_keywords.get().strip(),
+            "news_source": news_source.get(),
+            "birthday_month": int(birthday_month.get()) if birthday_month.get().isdigit() else 0,
+            "birthday_day": int(birthday_day.get()) if birthday_day.get().isdigit() else 0,
             "actions": [a for a in actions if a.get("phrase") and a.get("command")],
             "apps": {a.get("name"): a.get("command") for a in apps if a.get("name") and a.get("command")},
             "app_aliases": {a.get("alias"): a.get("target") for a in aliases if a.get("alias") and a.get("target")},
@@ -831,7 +837,7 @@ def main() -> None:
 
     def _record_hotkey(target_var: tk.StringVar) -> None:
         try:
-            from pynput import keyboard  # type: ignore
+            from input_wrapper import keyboard  # type: ignore
         except Exception:
             _notify_error("Missing Dependency", "pynput is required to record hotkeys.")
             return
@@ -934,8 +940,8 @@ def main() -> None:
 
     def _record_hold_key(target_var: tk.StringVar) -> None:
         try:
-            from pynput import keyboard  # type: ignore
-            from pynput import mouse as pynput_mouse  # type: ignore
+            from input_wrapper import keyboard  # type: ignore
+            from input_wrapper import mouse as pynput_mouse  # type: ignore
         except Exception:
             _notify_error("Missing Dependency", "pynput is required to record keys.")
             return
@@ -1349,22 +1355,18 @@ def main() -> None:
     def _refresh_apps():
         if apps_textbox is None:
             return
-        apps_textbox.configure(state="normal")
-        apps_textbox.delete("1.0", "end")
+        apps_textbox.delete(0, "end")
         for a in apps:
             name = a.get("name", "")
             command = a.get("command", "")
-            apps_textbox.insert("end", f"{name}  ->  {command}\n")
-        apps_textbox.configure(state="disabled")
+            apps_textbox.insert("end", f"{name}  ->  {command}")
 
     def _refresh_aliases():
         if aliases_textbox is None:
             return
-        aliases_textbox.configure(state="normal")
-        aliases_textbox.delete("1.0", "end")
+        aliases_textbox.delete(0, "end")
         for a in aliases:
-            aliases_textbox.insert("end", f"{a.get('alias')}  ->  {a.get('target')}\n")
-        aliases_textbox.configure(state="disabled")
+            aliases_textbox.insert("end", f"{a.get('alias')}  ->  {a.get('target')}")
 
     def _add_alias():
         alias = alias_var.get().strip().lower()
@@ -1381,7 +1383,10 @@ def main() -> None:
     def _remove_alias():
         if not aliases:
             return
-        aliases.pop(-1)
+        sel = aliases_textbox.curselection() if aliases_textbox else ()
+        idx = sel[0] if sel else len(aliases) - 1
+        if 0 <= idx < len(aliases):
+            aliases.pop(idx)
         _refresh_aliases()
         _refresh_save_prompt()
 
@@ -1410,7 +1415,10 @@ def main() -> None:
     def _remove_app():
         if not apps:
             return
-        apps.pop(-1)
+        sel = apps_textbox.curselection() if apps_textbox else ()
+        idx = sel[0] if sel else len(apps) - 1
+        if 0 <= idx < len(apps):
+            apps.pop(idx)
         _refresh_apps()
         _refresh_save_prompt()
 
@@ -1489,8 +1497,8 @@ def main() -> None:
     def _record_keybind_step(target_var: tk.StringVar) -> None:
         """Record a single key/combo and append it as a macro step."""
         try:
-            from pynput import keyboard as _kb  # type: ignore
-            from pynput import mouse as _ms  # type: ignore
+            from input_wrapper import keyboard as _kb  # type: ignore
+            from input_wrapper import mouse as _ms  # type: ignore
         except Exception:
             _notify_error("Missing Dependency", "pynput is required to record keys.")
             return
@@ -1730,6 +1738,68 @@ def main() -> None:
         _runtime_mode["value"] = "idle"
         status_var.set("Idle")
 
+    def _mute_status_update(msg) -> None:
+        """Called by skills when mute state changes. None = restore real status."""
+        def _do():
+            if msg == "Muted":
+                status_var.set("Muted")
+                # Keep polling to hold the Muted label while muted
+                def _hold_muted():
+                    from skills import is_muted
+                    if is_muted():
+                        status_var.set("Muted")
+                        root.after(500, _hold_muted)
+                root.after(500, _hold_muted)
+            else:
+                # Restore the real listening label based on current mode
+                m = _runtime_mode.get("value", "idle")
+                if m == "hold":
+                    status_var.set(f"Listening (hold {holdkey.get()})")
+                elif m == "toggle":
+                    status_var.set(f"Listening (toggle {hotkey.get()})")
+                elif m == "wake":
+                    status_var.set("Wake word active (say 'vera')")
+                else:
+                    status_var.set("Idle")
+        root.after(0, _do)
+
+    from skills import set_mute_status_callback, set_groq_flash_callback
+    set_mute_status_callback(_mute_status_update)
+
+    _groq_flash_timer = {"handle": None}
+
+    def _groq_flash() -> None:
+        """Flash 'AI response' in the status bar for 2 seconds then restore."""
+        from skills import is_muted
+        if is_muted():
+            return
+        def _do():
+            prev = status_var.get()
+            status_var.set("AI response")
+            if _groq_flash_timer["handle"] is not None:
+                try:
+                    root.after_cancel(_groq_flash_timer["handle"])
+                except Exception:
+                    pass
+            def _restore():
+                if status_var.get() == "AI response":
+                    status_var.set(prev)
+            _groq_flash_timer["handle"] = root.after(2000, _restore)
+        root.after(150, _do)
+
+    set_groq_flash_callback(_groq_flash)
+
+    # --- Reminder checker ---
+    def _check_reminders():
+        try:
+            from skills import check_due_reminders, _tts_speak
+            for msg in check_due_reminders():
+                _tts_speak(f"Reminder: {msg}", bypass_mute=True)
+        except Exception:
+            pass
+        root.after(30000, _check_reminders)
+    root.after(30000, _check_reminders)
+
     # --- Wake Word ---
     _WAKE_PHRASES = {"vera"}
     _wake_stop = threading.Event()
@@ -1852,7 +1922,7 @@ def main() -> None:
     # --- System Tray ---
     def _create_tray_icon():
         try:
-            import pystray  # type: ignore
+            from tray_wrapper import pystray  # type: ignore
             from PIL import Image, ImageDraw  # type: ignore
         except Exception:
             return None
@@ -2156,6 +2226,9 @@ def main() -> None:
         "spotify_media": spotify_media,
         "spotify_requires": spotify_requires,
         "spotify_keywords": spotify_keywords,
+        "news_source": news_source,
+        "birthday_month": birthday_month,
+        "birthday_day": birthday_day,
         "status_var": status_var,
         "transcript_var": transcript_var,
         "app_name_var": app_name_var,
@@ -2296,6 +2369,9 @@ def main() -> None:
         spotify_media,
         spotify_requires,
         spotify_keywords,
+        news_source,
+        birthday_month,
+        birthday_day,
         discord_bot_token_var,
         discord_server_id_var,
         gemini_api_key_var,

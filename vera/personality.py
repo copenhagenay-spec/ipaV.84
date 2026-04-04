@@ -242,6 +242,56 @@ _SESSION_COMMENTS = [
 
 
 # ---------------------------------------------------------------------------
+# Professional personality pools (free tier)
+# ---------------------------------------------------------------------------
+
+_PROFESSIONAL_CONFIRM_RESPONSES: dict[str, list[str]] = {
+    "open":    ["Opening.", "Launching.", "On it."],
+    "close":   ["Closing.", "Done.", "Closed."],
+    "search":  ["Searching.", "On it.", "Looking that up."],
+    "volume":  ["Done.", "Adjusted.", "Set."],
+    "timer":   ["Set.", "Timer running.", "Done."],
+    "note":    ["Saved.", "Noted.", "Done."],
+    "discord": ["Sent.", "Done.", "Message sent."],
+    "spotify": ["Done.", "Handled.", "Set."],
+    "default": ["Done.", "Confirmed.", "Handled.", "Complete.", "Executing."],
+}
+
+_PROFESSIONAL_FALLBACK: list[str] = [
+    "No skill matched that.",
+    "I don't have a handler for that.",
+    "That's outside my current capabilities.",
+    "Unrecognized command.",
+    "No match found.",
+]
+
+_PROFESSIONAL_FAILURE: dict[str, list[str]] = {
+    "open":    ["App not found.", "Not in the app list.", "Launch failed."],
+    "close":   ["Close failed.", "Process not found.", "Unable to close."],
+    "default": ["That failed.", "Unable to complete.", "Request failed."],
+}
+
+_PROFESSIONAL_WAKE_ACKS: list[str] = [
+    "Yes.", "Ready.", "Go ahead.", "Listening.", "What do you need.",
+]
+
+_PROFESSIONAL_STARTUP: list[str] = [
+    "Online. Ready.",
+    "System ready.",
+    "VERA online.",
+    "Ready.",
+    "Online. What do you need.",
+    "Up and running.",
+]
+
+_PROFESSIONAL_IDLE: list[str] = [
+    "Still running.",
+    "Standing by.",
+    "Online. Ready when you are.",
+    "Idle. Say something if you need me.",
+]
+
+# ---------------------------------------------------------------------------
 # Offensive personality pools (premium mode only)
 # ---------------------------------------------------------------------------
 
@@ -449,11 +499,14 @@ _OFFENSIVE_FAILURE_RESPONSES: dict[str, list[str]] = {
 
 
 def _get_mode() -> str:
-    """Return 'offensive' if premium + offensive mode is active, else 'default'."""
+    """Return the active personality mode: 'offensive', 'professional', or 'default'."""
     try:
         from config import load_config
+        mode = load_config().get("personality_mode", "default")
+        if mode == "professional":
+            return "professional"
         from license import is_premium
-        if is_premium() and load_config().get("personality_mode") == "offensive":
+        if mode == "offensive" and is_premium():
             return "offensive"
     except Exception:
         pass
@@ -462,8 +515,12 @@ def _get_mode() -> str:
 
 def get_confirm(category: str = "default") -> str:
     """Return a random confirmation line, activity-aware and occasionally session-nudging."""
-    if _get_mode() == "offensive":
+    mode = _get_mode()
+    if mode == "offensive":
         pool = _OFFENSIVE_CONFIRM_RESPONSES.get(category, _OFFENSIVE_CONFIRM_RESPONSES["default"])
+        return random.choice(pool)
+    if mode == "professional":
+        pool = _PROFESSIONAL_CONFIRM_RESPONSES.get(category, _PROFESSIONAL_CONFIRM_RESPONSES["default"])
         return random.choice(pool)
 
     try:
@@ -562,8 +619,11 @@ _WAKE_ACKS_LATE: list[str] = [
 
 def get_wake_ack() -> str:
     """Return a random wake acknowledgment, context-aware."""
-    if _get_mode() == "offensive":
+    mode = _get_mode()
+    if mode == "offensive":
         return random.choice(_OFFENSIVE_WAKE_ACKS)
+    if mode == "professional":
+        return random.choice(_PROFESSIONAL_WAKE_ACKS)
 
     try:
         from memory import get_session as _gs
@@ -1141,6 +1201,8 @@ _JOKES: list[str] = [
 
 def get_joke() -> str:
     """Return a random joke."""
+    if _get_mode() == "professional":
+        return random.choice(["I don't do jokes. What do you need.", "Not in my skill set. What else.", "Humor is outside my current feature set."])
     return random.choice(_JOKES)
 
 
@@ -1168,8 +1230,11 @@ _FALLBACK_RESPONSES: list[str] = [
 
 def get_fallback() -> str:
     """Return a random fallback response for unrecognized commands."""
-    if _get_mode() == "offensive":
+    mode = _get_mode()
+    if mode == "offensive":
         return random.choice(_OFFENSIVE_FALLBACK_RESPONSES)
+    if mode == "professional":
+        return random.choice(_PROFESSIONAL_FALLBACK)
     return random.choice(_FALLBACK_RESPONSES)
 
 
@@ -1237,8 +1302,12 @@ _FAILURE_RESPONSES: dict[str, list[str]] = {
 
 def get_failure(category: str = "default") -> str:
     """Return a random failure response for a command that couldn't execute."""
-    if _get_mode() == "offensive":
+    mode = _get_mode()
+    if mode == "offensive":
         pool = _OFFENSIVE_FAILURE_RESPONSES.get(category, _OFFENSIVE_FAILURE_RESPONSES["default"])
+        return random.choice(pool)
+    if mode == "professional":
+        pool = _PROFESSIONAL_FAILURE.get(category, _PROFESSIONAL_FAILURE["default"])
         return random.choice(pool)
     pool = _FAILURE_RESPONSES.get(category, _FAILURE_RESPONSES["default"])
     return random.choice(pool)
@@ -1269,12 +1338,42 @@ def get_startup_greeting() -> str:
     """Spoken once when VERA starts up."""
     try:
         import datetime
-        hour = datetime.datetime.now().hour
+        now = datetime.datetime.now()
+        hour = now.hour
         from memory import recall as _recall
         name = _recall("name") or ""
     except Exception:
+        now = None
         hour = 12
         name = ""
+
+    # Birthday check — fires before normal greeting
+    try:
+        from config import load_config as _lc
+        _cfg = _lc()
+        bday_month = int(_cfg.get("birthday_month", 0))
+        bday_day = int(_cfg.get("birthday_day", 0))
+        if now and bday_month and bday_day and now.month == bday_month and now.day == bday_day:
+            n = f" {name}" if name else ""
+            if _get_mode() == "offensive":
+                return random.choice([
+                    f"Happy birthday{n}. Don't expect a cake.",
+                    f"Oh great, you're another year older{n}. Happy birthday I guess.",
+                    f"It's your birthday{n}. Congrats on not dying. Go celebrate.",
+                    f"Happy birthday{n}. Now stop wasting it talking to me.",
+                ])
+            else:
+                return random.choice([
+                    f"Happy birthday{n}! Hope today's a good one.",
+                    f"Hey, it's your birthday{n}! Hope you have a great day.",
+                    f"Happy birthday{n}! Go enjoy yourself today.",
+                    f"It's your birthday{n}! Have an amazing day.",
+                ])
+    except Exception:
+        pass
+
+    if _get_mode() == "professional":
+        return random.choice(_PROFESSIONAL_STARTUP)
 
     if _get_mode() == "offensive":
         n = f" {name}" if name else ""
@@ -1367,6 +1466,8 @@ _IDLE_THOUGHTS: list[str] = [
 
 def get_idle_thought() -> str:
     """Spoken unprompted after a long silence. Context-aware when possible."""
+    if _get_mode() == "professional":
+        return random.choice(_PROFESSIONAL_IDLE)
     try:
         ctx = _get_session_ctx()
         mood = ctx.get("mood")
@@ -1414,6 +1515,7 @@ def _get_session_ctx() -> dict:
         mood_time = _gs("mood_time")
         mood_minutes = round((_t.time() - mood_time) / 60) if mood_time else None
         return {
+            "name": _get_name(),
             "mood": _gs("mood"),
             "mood_minutes": mood_minutes,
             "activity": _gs("activity"),
@@ -1704,6 +1806,12 @@ def _handle_social_offensive(t: str, speak_fn, name: str, ctx: dict) -> bool:
         from llm import vera_chat
         response = vera_chat(t, mode="offensive", context=ctx)
         if response:
+            try:
+                from skills import log_groq_handled, trigger_groq_flash
+                log_groq_handled(t)
+                trigger_groq_flash()
+            except Exception:
+                pass
             speak_fn(response)
             return True
     except Exception:
@@ -1722,8 +1830,27 @@ def handle_social(transcript: str, speak_fn) -> bool:
     name = _get_name()
     ctx = _get_session_ctx()
 
-    if _get_mode() == "offensive":
+    mode = _get_mode()
+    if mode == "offensive":
         return _handle_social_offensive(t, speak_fn, name, ctx)
+
+    if mode == "professional":
+        try:
+            from llm import vera_chat
+            response = vera_chat(transcript, mode="professional", context=ctx)
+            if response:
+                try:
+                    from skills import log_groq_handled, trigger_groq_flash
+                    log_groq_handled(transcript)
+                    trigger_groq_flash()
+                except Exception:
+                    pass
+                speak_fn(response)
+                return True
+        except Exception:
+            pass
+        speak_fn(random.choice(["What do you need.", "Go ahead.", "I'm listening."]))
+        return True
 
     mood = ctx.get("mood")
     mood_minutes = ctx.get("mood_minutes")
@@ -1806,6 +1933,12 @@ def handle_social(transcript: str, speak_fn) -> bool:
         from llm import vera_chat
         response = vera_chat(transcript, mode="default", context=ctx)
         if response:
+            try:
+                from skills import log_groq_handled, trigger_groq_flash
+                log_groq_handled(transcript)
+                trigger_groq_flash()
+            except Exception:
+                pass
             speak_fn(response)
             return True
     except Exception:
