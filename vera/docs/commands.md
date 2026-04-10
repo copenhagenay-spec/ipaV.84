@@ -138,11 +138,15 @@ A full list of everything you can say to VERA. Say **"what can I say"** at any t
 | What to say | What happens |
 |---|---|
 | `discord <channel> <message>` | Sends a message to a Discord channel via webhook |
+| `discord <server> <channel> <message>` | Sends to a specific server's channel |
 | `read discord <channel>` | Reads the last message in a channel aloud |
+| `read discord <server> <channel>` | Reads from a specific server's channel |
+| `discord delete <channel>` | Deletes the last message sent to a channel |
+| `discord purge <channel> <n>` | Bulk deletes up to 100 messages |
 
 > Requires Discord webhook setup in the VERA settings. See the [Discord Setup Guide](discord.md) for details.
 >
-> **Note:** To create a webhook you must have **Administrator** or **Manage Webhooks** permission in the Discord server. This feature is intended for server owners and administrators.
+> **Note:** To create a webhook you must have **Administrator** or **Manage Webhooks** permission in the Discord server.
 
 ---
 
@@ -209,11 +213,3 @@ Custom phrases mapped to keypresses — configured in the **Actions** tab of the
 | `what can I say` | Opens the command reference window |
 | `show commands` | Same as above |
 | `show help` | Same as above |
-
----
-
-## Mishear Training
-
-VERA didn't understand something? The Training tab lets you correct it so it works next time.
-
-> See the [Mishear Training Guide](training.md) for details.

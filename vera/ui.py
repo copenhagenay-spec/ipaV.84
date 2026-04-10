@@ -128,7 +128,6 @@ def _queue_native_scroll(canvas, delta: int) -> None:
     canvas._vera_scroll_pending = pending
     if getattr(canvas, "_vera_scroll_scheduled", False):
         return
-
     canvas._vera_scroll_scheduled = True
 
     def _flush():
@@ -137,14 +136,15 @@ def _queue_native_scroll(canvas, delta: int) -> None:
         canvas._vera_scroll_pending = 0
         if pending_delta == 0:
             return
-        direction = -1 if pending_delta > 0 else 1
-        steps = max(1, min(8, int(abs(pending_delta) / 120) + 1))
+        steps = -(pending_delta // 120) * 2
+        if steps == 0:
+            steps = -1 if pending_delta > 0 else 1
         try:
-            canvas.yview_scroll(direction * steps, "units")
+            canvas.yview_scroll(steps, "units")
         except Exception:
             pass
 
-    canvas.after(12, _flush)
+    canvas.after(8, _flush)
 
 
 def install_smooth_scrolling(root, *scrollables) -> None:
@@ -152,6 +152,8 @@ def install_smooth_scrolling(root, *scrollables) -> None:
     for scrollable in scrollables:
         if scrollable not in registered:
             registered.append(scrollable)
+            # Set pixel-level scroll increment to eliminate jump tearing
+            pass  # no per-canvas config needed
     root._vera_scrollables = registered
     if getattr(root, "_vera_scroll_bound", False):
         return

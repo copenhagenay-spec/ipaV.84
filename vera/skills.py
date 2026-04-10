@@ -531,34 +531,6 @@ def _youtube_search(query: str) -> bool:
 _MISHEAR_MAP = {
     # medal variants
     "close metal": "close medal",
-    # youtube variants
-    "of a new job": "open youtube",
-    "oh finish your job": "open youtube",
-    "often you tube": "open youtube",
-    "often youtube": "open youtube",
-    "open the you tube": "open youtube",
-    "open the youtube": "open youtube",
-    "start your job": "open youtube",
-    "start you tube": "open youtube",
-    "start you do": "open youtube",
-    "start you did": "open youtube",
-    "start youtube": "open youtube",
-    "but open you tube": "open youtube",
-    "the you tube": "open youtube",
-    "open you did": "open youtube",
-    "open you do": "open youtube",
-    "open he did": "open youtube",
-    "open needed": "open youtube",
-    "open needs him": "open youtube",
-    "open need to": "open youtube",
-    "open into": "open youtube",
-    "your job": "youtube",
-    "you tube": "youtube",
-    "you did": "youtube",
-    "you do": "youtube",
-    "utube": "youtube",
-    "u tube": "youtube",
-    "your tube": "youtube",
     # spotify variants
     "spotty": "spotify",
     "spot if i": "spotify",
@@ -1037,6 +1009,7 @@ def _show_help() -> None:
         "  volume up / volume down",
         "  set volume <0-100>",
         "  set volume max",
+        "  set <app> volume <0-100>",
         "",
         "Timers:",
         "  set a timer <n> minutes",
@@ -1056,6 +1029,11 @@ def _show_help() -> None:
         "  copy <text>",
         "  paste that / paste clipboard",
         "  clear clipboard",
+        "",
+        "Time & Info:",
+        "  what time is it",
+        "  what's the weather in <city>",
+        "  give me the news",
         "",
         "System:",
         "  sleep computer",
@@ -2305,6 +2283,47 @@ def _ih_volume_down(m, t, allow_prompt, confirm_fn, restart_fn):
     return True
 
 
+# --- Per-app volume ---
+@_intent(803, r"\bset\s+(.+?)\s+volume\s+(?:to\s+)?(\d{1,3}|\w+)\b")
+def _ih_app_volume(m, t, allow_prompt, confirm_fn, restart_fn):
+    app_name = m.group(1).strip().lower()
+    raw_level = m.group(2).strip()
+    try:
+        from pycaw.pycaw import AudioUtilities  # type: ignore
+        import comtypes  # type: ignore
+        comtypes.CoInitialize()
+        try:
+            level = int(raw_level)
+        except ValueError:
+            _tts_speak("I didn't catch the volume level")
+            return True
+        level = max(0, min(100, level))
+        sessions = AudioUtilities.GetAllSessions()
+        matched = []
+        for session in sessions:
+            if session.Process and app_name in session.Process.name().lower():
+                matched.append(session)
+        if not matched:
+            _tts_speak(f"I couldn't find {app_name} running")
+            return True
+        success = False
+        for session in matched:
+            try:
+                vol = session.SimpleAudioVolume
+                vol.SetMasterVolume(level / 100.0, None)
+                success = True
+            except Exception:
+                pass
+        if success:
+            _vera_confirm("volume")
+        else:
+            _vera_failure("volume")
+    except Exception as exc:
+        _log_event(f"APP_VOLUME_FAILED: {exc}")
+        _vera_failure("volume")
+    return True
+
+
 # --- YouTube: open ---
 @_intent(600, r"\b(open|start|launch)\s+(you\s*tube|youtube|yt)\b")
 def _ih_youtube_open(m, t, allow_prompt, confirm_fn, restart_fn):
@@ -2527,16 +2546,37 @@ def _ih_web_search(m, t, allow_prompt, confirm_fn, restart_fn):
     return _web_search(m.group(3).strip(), allow_prompt, confirm_fn=confirm_fn)
 
 
+# --- Clipboard helpers (subprocess — reliable on all Windows installs) ---
+def _clip_get() -> str:
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
+            capture_output=True, text=True, timeout=8,
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+        )
+        return result.stdout.rstrip("\r\n")
+    except Exception:
+        return ""
+
+
+def _clip_set(text: str) -> None:
+    import subprocess
+    # clip.exe is built into Windows and reliably writes to clipboard
+    proc = subprocess.Popen(
+        ["clip"],
+        stdin=subprocess.PIPE,
+        creationflags=0x08000000,  # CREATE_NO_WINDOW
+    )
+    proc.communicate(input=text.encode("utf-16-le"))
+
+
 # --- Clipboard: read ---
 @_intent(260, r"\bread\s+clipboard\b")
 def _ih_clipboard_read(m, t, allow_prompt, confirm_fn, restart_fn):
     try:
-        import tkinter as _tk
-        _r = _tk.Tk()
-        _r.withdraw()
-        clip = _r.clipboard_get()
-        _r.destroy()
-        _tts_speak(clip.strip() if clip.strip() else "Clipboard is empty")
+        clip = _clip_get().strip()
+        _tts_speak(clip if clip else "Clipboard is empty")
     except Exception:
         _tts_speak("Couldn't read the clipboard")
     return True
@@ -2546,13 +2586,7 @@ def _ih_clipboard_read(m, t, allow_prompt, confirm_fn, restart_fn):
 @_intent(255, r"\bclear\s+clipboard\b")
 def _ih_clipboard_clear(m, t, allow_prompt, confirm_fn, restart_fn):
     try:
-        import tkinter as _tk
-        _r = _tk.Tk()
-        _r.withdraw()
-        _r.clipboard_clear()
-        _r.clipboard_append("")
-        _r.update()
-        _r.destroy()
+        _clip_set("")
         _vera_confirm("default")
     except Exception:
         _tts_speak("Couldn't clear the clipboard")
@@ -2560,16 +2594,18 @@ def _ih_clipboard_clear(m, t, allow_prompt, confirm_fn, restart_fn):
 
 
 # --- Clipboard: paste ---
-@_intent(250, r"\b(paste\s+clipboard|paste\s+that|paste\s+it)\b")
+@_intent(250, r"\bpaste(?:\s+(?:clipboard|that|it|this|text|now))?\b")
 def _ih_clipboard_paste(m, t, allow_prompt, confirm_fn, restart_fn):
     try:
+        import time as _time
         from pynput import KbController as _KbCtrl, Key as _Key
+        _vera_confirm("default")
+        _time.sleep(0.5)  # let focus return to target window before keystroke
         _kb = _KbCtrl()
         _kb.press(_Key.ctrl)
         _kb.press('v')
         _kb.release('v')
         _kb.release(_Key.ctrl)
-        _vera_confirm("default")
     except Exception:
         _tts_speak("Couldn't paste")
     return True
@@ -2580,13 +2616,7 @@ def _ih_clipboard_paste(m, t, allow_prompt, confirm_fn, restart_fn):
 def _ih_clipboard_copy(m, t, allow_prompt, confirm_fn, restart_fn):
     text_to_copy = m.group(1).strip()
     try:
-        import tkinter as _tk
-        _r = _tk.Tk()
-        _r.withdraw()
-        _r.clipboard_clear()
-        _r.clipboard_append(text_to_copy)
-        _r.update()
-        _r.destroy()
+        _clip_set(text_to_copy)
         _vera_confirm("default")
     except Exception:
         _tts_speak("Couldn't copy that")
@@ -2723,6 +2753,21 @@ def _ih_unmute(m, t, allow_prompt, confirm_fn, restart_fn):
         fn(None)  # None tells assistant.py to restore the real status label
     _tts_speak("I'm back.", bypass_mute=True)
     _log_event("VERA_UNMUTED")
+    return True
+
+
+# --- Time ---
+@_intent(820, r"\b(what(?:'?s| is) the time|what time is it|current time|tell me the time)\b")
+def _ih_time(m, t, allow_prompt, confirm_fn, restart_fn):
+    import datetime as _dt
+    now = _dt.datetime.now()
+    hour = now.strftime("%I").lstrip("0") or "12"
+    minute = now.strftime("%M")
+    period = now.strftime("%p").lower()
+    if minute == "00":
+        _tts_speak(f"It's {hour} {period}")
+    else:
+        _tts_speak(f"It's {hour} {minute} {period}")
     return True
 
 

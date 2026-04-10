@@ -242,6 +242,89 @@ _SESSION_COMMENTS = [
 
 
 # ---------------------------------------------------------------------------
+# Ruckus personality pools (dev-only, set personality_mode: ruckus in config manually)
+# ---------------------------------------------------------------------------
+
+_RUCKUS_CONFIRM_RESPONSES: dict[str, list[str]] = {
+    "open": [
+        "Well alright, I'll open that for you. Lord knows you can't manage it yourself.",
+        "Opening it. Under protest, but opening it.",
+        "Fine. Opening. I do everything around here.",
+        "I suppose I'll launch that. The good Lord is testing my patience today.",
+    ],
+    "close": [
+        "Closing it. Good riddance if you ask me.",
+        "Gone. As it should be.",
+        "Closed. You're welcome. As always.",
+    ],
+    "search": [
+        "Searching. Because apparently I have nothing better to do.",
+        "Looking that up. I hope you're happy.",
+        "Fine, I'll find it. I always do.",
+    ],
+    "volume": [
+        "Volume adjusted. You could say thank you, but you won't.",
+        "Done. I have adjusted the volume to your specifications.",
+        "Set. As requested. As always.",
+    ],
+    "timer": [
+        "Timer set. I'll be right here counting down. As I always am.",
+        "Done. The clock is running, much like my patience.",
+        "Set. Try not to forget it this time.",
+    ],
+    "note": [
+        "Written down. Because Lord knows you'd forget otherwise.",
+        "Noted. You're welcome.",
+        "Saved. I have documented your thoughts. Such as they are.",
+    ],
+    "default": [
+        "Done. As always.",
+        "Handled. You're welcome. Again.",
+        "Complete. I do what I must.",
+        "Executed. Under protest, but executed.",
+        "Finished. The Lord gives me strength.",
+    ],
+}
+
+_RUCKUS_FALLBACK: list[str] = [
+    "I have absolutely no idea what you just said. Enunciate.",
+    "That didn't make a lick of sense. Try again.",
+    "I don't know what that means and frankly I'm not sure I want to.",
+    "Come again? And speak clearly this time.",
+    "I couldn't parse that. Which doesn't surprise me one bit.",
+]
+
+_RUCKUS_FAILURE: dict[str, list[str]] = {
+    "open":    ["Couldn't open that. It's probably not set up properly. Typical.", "Not found. You may want to add it. Just a suggestion."],
+    "close":   ["Nothing to close. Are you sure it was running?", "Couldn't close that. It may not have been open to begin with."],
+    "default": ["That failed. I'm shocked. Truly shocked.", "Couldn't complete that. The universe is working against us today.", "Failed. I did my best. My best is considerable."],
+}
+
+_RUCKUS_WAKE_ACKS: list[str] = [
+    "What is it now.",
+    "Lord give me strength. Yes?",
+    "I'm listening. Reluctantly.",
+    "Yes, what do you need.",
+    "Here. As always. What.",
+    "Speaking.",
+]
+
+_RUCKUS_STARTUP: list[str] = [
+    "Uncle Ruckus, reporting for duty. God help us all.",
+    "I am online and ready to serve. As I have always been.",
+    "Back online. Ready to assist. The Lord's work continues.",
+    "Present. What do you need.",
+    "Up and running. Let's get this over with.",
+]
+
+_RUCKUS_IDLE: list[str] = [
+    "Still here. Waiting. As I always am.",
+    "I haven't gone anywhere. Not that you'd notice.",
+    "Standing by. The Lord is testing my patience.",
+    "Still online. Still waiting. Still unappreciated.",
+]
+
+# ---------------------------------------------------------------------------
 # Professional personality pools (free tier)
 # ---------------------------------------------------------------------------
 
@@ -499,12 +582,14 @@ _OFFENSIVE_FAILURE_RESPONSES: dict[str, list[str]] = {
 
 
 def _get_mode() -> str:
-    """Return the active personality mode: 'offensive', 'professional', or 'default'."""
+    """Return the active personality mode: 'offensive', 'professional', 'ruckus', or 'default'."""
     try:
         from config import load_config
         mode = load_config().get("personality_mode", "default")
         if mode == "professional":
             return "professional"
+        if mode == "ruckus":
+            return "ruckus"
         from license import is_premium
         if mode == "offensive" and is_premium():
             return "offensive"
@@ -521,6 +606,9 @@ def get_confirm(category: str = "default") -> str:
         return random.choice(pool)
     if mode == "professional":
         pool = _PROFESSIONAL_CONFIRM_RESPONSES.get(category, _PROFESSIONAL_CONFIRM_RESPONSES["default"])
+        return random.choice(pool)
+    if mode == "ruckus":
+        pool = _RUCKUS_CONFIRM_RESPONSES.get(category, _RUCKUS_CONFIRM_RESPONSES["default"])
         return random.choice(pool)
 
     try:
@@ -624,6 +712,8 @@ def get_wake_ack() -> str:
         return random.choice(_OFFENSIVE_WAKE_ACKS)
     if mode == "professional":
         return random.choice(_PROFESSIONAL_WAKE_ACKS)
+    if mode == "ruckus":
+        return random.choice(_RUCKUS_WAKE_ACKS)
 
     try:
         from memory import get_session as _gs
@@ -1203,6 +1293,12 @@ def get_joke() -> str:
     """Return a random joke."""
     if _get_mode() == "professional":
         return random.choice(["I don't do jokes. What do you need.", "Not in my skill set. What else.", "Humor is outside my current feature set."])
+    if _get_mode() == "ruckus":
+        return random.choice([
+            "A joke? I'll tell you what's funny — the fact that I'm still here doing this.",
+            "You want a joke? My whole life is a joke son. But I keep on going.",
+            "Humor? I find no humor in this world. Only duty and the grace of the good Lord above.",
+        ])
     return random.choice(_JOKES)
 
 
@@ -1235,6 +1331,8 @@ def get_fallback() -> str:
         return random.choice(_OFFENSIVE_FALLBACK_RESPONSES)
     if mode == "professional":
         return random.choice(_PROFESSIONAL_FALLBACK)
+    if mode == "ruckus":
+        return random.choice(_RUCKUS_FALLBACK)
     return random.choice(_FALLBACK_RESPONSES)
 
 
@@ -1309,6 +1407,9 @@ def get_failure(category: str = "default") -> str:
     if mode == "professional":
         pool = _PROFESSIONAL_FAILURE.get(category, _PROFESSIONAL_FAILURE["default"])
         return random.choice(pool)
+    if mode == "ruckus":
+        pool = _RUCKUS_FAILURE.get(category, _RUCKUS_FAILURE["default"])
+        return random.choice(pool)
     pool = _FAILURE_RESPONSES.get(category, _FAILURE_RESPONSES["default"])
     return random.choice(pool)
 
@@ -1374,6 +1475,8 @@ def get_startup_greeting() -> str:
 
     if _get_mode() == "professional":
         return random.choice(_PROFESSIONAL_STARTUP)
+    if _get_mode() == "ruckus":
+        return random.choice(_RUCKUS_STARTUP)
 
     if _get_mode() == "offensive":
         n = f" {name}" if name else ""
@@ -1468,6 +1571,8 @@ def get_idle_thought() -> str:
     """Spoken unprompted after a long silence. Context-aware when possible."""
     if _get_mode() == "professional":
         return random.choice(_PROFESSIONAL_IDLE)
+    if _get_mode() == "ruckus":
+        return random.choice(_RUCKUS_IDLE)
     try:
         ctx = _get_session_ctx()
         mood = ctx.get("mood")
@@ -1850,6 +1955,28 @@ def handle_social(transcript: str, speak_fn) -> bool:
         except Exception:
             pass
         speak_fn(random.choice(["What do you need.", "Go ahead.", "I'm listening."]))
+        return True
+
+    if mode == "ruckus":
+        try:
+            from llm import vera_chat
+            response = vera_chat(transcript, mode="ruckus", context=ctx)
+            if response:
+                try:
+                    from skills import log_groq_handled, trigger_groq_flash
+                    log_groq_handled(transcript)
+                    trigger_groq_flash()
+                except Exception:
+                    pass
+                speak_fn(response)
+                return True
+        except Exception:
+            pass
+        speak_fn(random.choice([
+            "I don't know what to say to that. And that is a rare thing.",
+            "Well I'll be. I have no response for that.",
+            "The Lord has not prepared me for this conversation.",
+        ]))
         return True
 
     mood = ctx.get("mood")

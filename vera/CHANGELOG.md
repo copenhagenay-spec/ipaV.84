@@ -1,20 +1,5 @@
 # Changelog
 
-## 0.96
-
-**New Features:**
-- Professional personality mode (free tier) — clean, direct responses with no fluff or warmth; selectable in Settings alongside Default and Offensive
-- Scheduled reminders — set reminders by voice ("remind me in 30 minutes to take my meds", "set a reminder to call mom at 9pm"); list and cancel by voice; reminders survive restarts and fire even when muted
-- AI response indicator — status bar flashes "AI response" for 2 seconds whenever Groq handles a response so you always know when the LLM is talking vs a real skill
-- VERA now knows your name in AI conversations — stored name is injected into every Groq call so responses feel personal
-
-**Bug Fixes:**
-- "What's my name", "what's the weather", and "don't forget" no longer fall through to Groq — apostrophe stripping in the audio pipeline was breaking intent matching for these phrases
-- Remembered facts no longer silently overwrite each other — was using string length as the storage key, causing collisions
-- AI response flash was being immediately overwritten by the listening status — now displays correctly after speech completes
-- Voice profile changes no longer break Groq conversational integration
-- Reminders now match natural phrasing in both word orders — time-first and message-first both work
-
 ## 0.89.0
 - Bug report now submits to Discord automatically — creates a private ticket with description, VERA version, and full log zip attached
 - Description and Discord username prompts added to bug report flow

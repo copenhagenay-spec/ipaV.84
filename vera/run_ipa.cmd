@@ -1,4 +1,4 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-pyw assistant.py
+"%LOCALAPPDATA%\Programs\Python\Python314\pythonw.exe" assistant.py
