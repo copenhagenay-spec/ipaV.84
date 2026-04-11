@@ -1,1016 +1,1025 @@
-"""Main UI layout for VERA (CustomTkinter)."""
+"""Main UI layout for VERA (PySide6)."""
 
 from __future__ import annotations
 
-import tkinter as tk
-import customtkinter as ctk
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QLineEdit, QComboBox, QCheckBox, QRadioButton, QButtonGroup,
+    QSlider, QTextEdit, QListWidget, QAbstractItemView,
+    QTabWidget, QScrollArea, QFrame, QProgressBar, QSizePolicy,
+    QSpacerItem,
+)
+from PySide6.QtCore import Qt, Signal, QObject
+from PySide6.QtGui import QFont, QPixmap, QColor
 
 
 # ---------------------------------------------------------------------------
-# Layout constants
-# ---------------------------------------------------------------------------
-PAD_SECTION = 16
-PAD_CARD = 16
-PAD_OUTER = 16
-CORNER_R = 10
-FONT_HEADER = ("Segoe UI", 14, "bold")
-FONT_BODY = ("Segoe UI", 12)
-FONT_HELP = ("Segoe UI", 11)
-COLOR_HELP = ("gray50", "gray60")
-COLOR_WARN = ("#cc7700", "#ffaa00")
-
-
-# ---------------------------------------------------------------------------
-# Button helper factories
+# Style helpers
 # ---------------------------------------------------------------------------
 
-def _primary_btn(parent, **kw):
-    """Blue primary action button (default CTk accent)."""
-    defaults = dict(height=36, corner_radius=8)
-    defaults.update(kw)
-    return ctk.CTkButton(parent, **defaults)
+_ACCENT   = "#2563eb"
+_DANGER   = "#c0392b"
+_SURFACE  = "#2b2b2b"
+_BG       = "#1e1e1e"
+_TEXT     = "#ffffff"
+_MUTED    = "#888888"
+_WARN_FG  = "#ffaa00"
+
+_BTN_PRIMARY = f"""
+    QPushButton {{
+        background-color: {_ACCENT}; color: {_TEXT};
+        border-radius: 8px; padding: 6px 14px;
+        font-size: 13px;
+    }}
+    QPushButton:hover {{ background-color: #1d4ed8; }}
+    QPushButton:pressed {{ background-color: #1e40af; }}
+"""
+_BTN_SECONDARY = f"""
+    QPushButton {{
+        background-color: #404040; color: {_TEXT};
+        border-radius: 6px; padding: 5px 12px;
+        font-size: 12px;
+    }}
+    QPushButton:hover {{ background-color: #505050; }}
+"""
+_BTN_DANGER = f"""
+    QPushButton {{
+        background-color: {_DANGER}; color: {_TEXT};
+        border-radius: 6px; padding: 5px 12px;
+        font-size: 12px;
+    }}
+    QPushButton:hover {{ background-color: #a93226; }}
+"""
+_BTN_MUTED = f"""
+    QPushButton {{
+        background-color: transparent; color: #aaaaaa;
+        border: 1px solid #555555; border-radius: 6px;
+        padding: 5px 12px; font-size: 12px;
+    }}
+    QPushButton:hover {{ background-color: #333333; }}
+"""
+_LIST_STYLE = f"""
+    QListWidget {{
+        background-color: #262626; color: {_TEXT};
+        border: 1px solid #404040; border-radius: 4px;
+        font-family: "Segoe UI Semibold"; font-size: 11px;
+    }}
+    QListWidget::item:selected {{
+        background-color: {_ACCENT}; color: {_TEXT};
+    }}
+"""
+_ENTRY_STYLE = f"""
+    QLineEdit {{
+        background-color: #333333; color: {_TEXT};
+        border: 1px solid #555555; border-radius: 4px;
+        padding: 4px 8px;
+    }}
+    QLineEdit:focus {{ border: 1px solid {_ACCENT}; }}
+"""
+_COMBO_STYLE = f"""
+    QComboBox {{
+        background-color: #333333; color: {_TEXT};
+        border: 1px solid #555555; border-radius: 4px;
+        padding: 4px 8px;
+    }}
+    QComboBox::drop-down {{ border: none; }}
+    QComboBox QAbstractItemView {{
+        background-color: #2b2b2b; color: {_TEXT};
+        selection-background-color: {_ACCENT};
+    }}
+"""
+_CHECK_STYLE = f"""
+    QCheckBox {{ color: {_TEXT}; }}
+    QCheckBox::indicator {{ width: 16px; height: 16px; }}
+"""
+_RADIO_STYLE = f"""
+    QRadioButton {{ color: {_TEXT}; }}
+"""
 
 
-def _secondary_btn(parent, **kw):
-    """Gray secondary action button."""
-    defaults = dict(
-        fg_color=("gray70", "gray30"),
-        hover_color=("gray60", "gray40"),
-        height=32,
-        corner_radius=6,
-    )
-    defaults.update(kw)
-    return ctk.CTkButton(parent, **defaults)
+def _primary_btn(text, command=None) -> QPushButton:
+    btn = QPushButton(text)
+    btn.setStyleSheet(_BTN_PRIMARY)
+    if command:
+        btn.clicked.connect(command)
+    return btn
 
 
-def _danger_btn(parent, **kw):
-    """Red destructive action button."""
-    defaults = dict(
-        fg_color=("#c0392b", "#c0392b"),
-        hover_color=("#a93226", "#a93226"),
-        height=32,
-        corner_radius=6,
-    )
-    defaults.update(kw)
-    return ctk.CTkButton(parent, **defaults)
+def _secondary_btn(text, command=None) -> QPushButton:
+    btn = QPushButton(text)
+    btn.setStyleSheet(_BTN_SECONDARY)
+    if command:
+        btn.clicked.connect(command)
+    return btn
 
 
-def _muted_btn(parent, **kw):
-    """Outline-only utility button."""
-    defaults = dict(
-        fg_color="transparent",
-        border_width=1,
-        border_color=("gray60", "gray40"),
-        text_color=("gray30", "gray70"),
-        hover_color=("gray85", "gray25"),
-        height=30,
-        corner_radius=6,
-    )
-    defaults.update(kw)
-    return ctk.CTkButton(parent, **defaults)
+def _danger_btn(text, command=None) -> QPushButton:
+    btn = QPushButton(text)
+    btn.setStyleSheet(_BTN_DANGER)
+    if command:
+        btn.clicked.connect(command)
+    return btn
 
 
-# ---------------------------------------------------------------------------
-# Section helpers
-# ---------------------------------------------------------------------------
+def _muted_btn(text, command=None) -> QPushButton:
+    btn = QPushButton(text)
+    btn.setStyleSheet(_BTN_MUTED)
+    if command:
+        btn.clicked.connect(command)
+    return btn
 
-def _section_header(parent, title, help_text=None):
-    """Add a bold section title with optional help text."""
-    ctk.CTkLabel(parent, text=title, font=FONT_HEADER).pack(
-        anchor="w", padx=PAD_OUTER, pady=(PAD_SECTION, 4)
-    )
+
+def _make_entry(width=None, placeholder="", password=False) -> QLineEdit:
+    e = QLineEdit()
+    e.setStyleSheet(_ENTRY_STYLE)
+    e.setPlaceholderText(placeholder)
+    if password:
+        e.setEchoMode(QLineEdit.Password)
+    if width:
+        e.setFixedWidth(width)
+    return e
+
+
+def _make_combo(choices, width=None) -> QComboBox:
+    c = QComboBox()
+    c.addItems(choices)
+    c.setStyleSheet(_COMBO_STYLE)
+    if width:
+        c.setFixedWidth(width)
+    return c
+
+
+class _ListWidget(QListWidget):
+    """QListWidget that consumes wheel events so they don't bubble to the parent scroll area."""
+    def wheelEvent(self, event):
+        super().wheelEvent(event)
+        event.accept()
+
+
+def _make_listbox(height_rows=6) -> QListWidget:
+    lb = _ListWidget()
+    lb.setStyleSheet(_LIST_STYLE)
+    lb.setFixedHeight(height_rows * 22 + 16)
+    lb.setSelectionMode(QAbstractItemView.SingleSelection)
+    return lb
+
+
+def _section_label(text, help_text=None) -> tuple:
+    spacer = QWidget()
+    spacer.setFixedHeight(6)
+    lbl = QLabel(text)
+    lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #ffffff; margin-top: 4px;")
+    widgets = [spacer, lbl]
     if help_text:
-        ctk.CTkLabel(
-            parent, text=help_text, font=FONT_HELP, text_color=COLOR_HELP,
-            wraplength=520,
-        ).pack(anchor="w", padx=PAD_OUTER, pady=(0, 6))
+        h = QLabel(help_text)
+        h.setStyleSheet(f"color: {_MUTED}; font-size: 11px;")
+        h.setWordWrap(True)
+        widgets.append(h)
+    return widgets
 
 
-def _card(parent):
-    """Create a styled card frame."""
-    frame = ctk.CTkFrame(parent, corner_radius=CORNER_R)
-    frame.pack(fill="x", padx=PAD_OUTER - 2, pady=4)
-    return frame
+def _card_frame() -> QFrame:
+    f = QFrame()
+    f.setStyleSheet(f"QFrame {{ background-color: {_SURFACE}; border-radius: 10px; }}")
+    return f
 
 
-def _card_row(card, transparent=True):
-    """Create a row inside a card."""
-    row = ctk.CTkFrame(card, fg_color="transparent" if transparent else None)
-    row.pack(fill="x", padx=PAD_CARD, pady=4)
+def _hrow(*widgets) -> QWidget:
+    row = QWidget()
+    row.setStyleSheet("background: transparent;")
+    rl = QHBoxLayout(row)
+    rl.setContentsMargins(0, 0, 0, 0)
+    rl.setSpacing(8)
+    for w in widgets:
+        rl.addWidget(w)
+    rl.addStretch()
     return row
 
 
-def _btn_row(parent):
-    """Create a transparent frame for a row of buttons."""
-    row = ctk.CTkFrame(parent, fg_color="transparent")
-    row.pack(fill="x", padx=PAD_OUTER, pady=(6, PAD_SECTION))
-    return row
+def _scrollable_tab() -> tuple[QScrollArea, QWidget, QVBoxLayout]:
+    area = QScrollArea()
+    area.setWidgetResizable(True)
+    area.setFrameShape(QFrame.NoFrame)
+    area.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+    inner = QWidget()
+    inner.setStyleSheet("background: transparent;")
+    vl = QVBoxLayout(inner)
+    vl.setContentsMargins(12, 12, 12, 12)
+    vl.setSpacing(6)
+    area.setWidget(inner)
+    return area, inner, vl
 
 
-def _make_scrollable(parent):
-    frame = ctk.CTkScrollableFrame(
-        parent,
-        fg_color="transparent",
-        corner_radius=0,
-    )
-    frame.pack(fill="both", expand=True)
-    return frame
+# ---------------------------------------------------------------------------
+# Overlay widget — covers the full parent, shown/hidden as a blocking splash
+# ---------------------------------------------------------------------------
 
+class _OverlayWidget(QWidget):
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setVisible(False)
+        parent.installEventFilter(self)
 
-def _scroll_canvas(scrollable):
-    return getattr(scrollable, "_parent_canvas", None)
+    def eventFilter(self, obj, event):
+        from PySide6.QtCore import QEvent
+        if obj is self.parent() and event.type() == QEvent.Resize:
+            self.setGeometry(0, 0, obj.width(), obj.height())
+        return False
 
+    def show_over(self):
+        self.setGeometry(0, 0, self.parent().width(), self.parent().height())
+        self.setVisible(True)
+        self.raise_()
 
-def _queue_native_scroll(canvas, delta: int) -> None:
-    if canvas is None:
-        return
-    pending = int(getattr(canvas, "_vera_scroll_pending", 0)) + int(delta)
-    canvas._vera_scroll_pending = pending
-    if getattr(canvas, "_vera_scroll_scheduled", False):
-        return
-    canvas._vera_scroll_scheduled = True
-
-    def _flush():
-        canvas._vera_scroll_scheduled = False
-        pending_delta = int(getattr(canvas, "_vera_scroll_pending", 0))
-        canvas._vera_scroll_pending = 0
-        if pending_delta == 0:
-            return
-        steps = -(pending_delta // 120) * 2
-        if steps == 0:
-            steps = -1 if pending_delta > 0 else 1
-        try:
-            canvas.yview_scroll(steps, "units")
-        except Exception:
-            pass
-
-    canvas.after(8, _flush)
-
-
-def install_smooth_scrolling(root, *scrollables) -> None:
-    registered = list(getattr(root, "_vera_scrollables", []))
-    for scrollable in scrollables:
-        if scrollable not in registered:
-            registered.append(scrollable)
-            # Set pixel-level scroll increment to eliminate jump tearing
-            pass  # no per-canvas config needed
-    root._vera_scrollables = registered
-    if getattr(root, "_vera_scroll_bound", False):
-        return
-
-    def _find_scrollable(widget):
-        current = widget
-        while current is not None:
-            for scrollable in root._vera_scrollables:
-                if current is scrollable:
-                    return scrollable
-            current = getattr(current, "master", None)
-        return None
-
-    def _on_mousewheel(event):
-        import tkinter as _tk_chk
-        widget = root.winfo_containing(event.x_root, event.y_root)
-        # If hovering over a Listbox, let it scroll itself — don't hijack
-        if isinstance(widget, _tk_chk.Listbox):
-            widget.yview_scroll(-1 * (event.delta // 120), "units")
-            return "break"
-        scrollable = _find_scrollable(widget)
-        if scrollable is None:
-            return
-        canvas = _scroll_canvas(scrollable)
-        if canvas is None:
-            return "break"
-        delta = event.delta
-        if delta == 0 and getattr(event, "num", None) == 4:
-            delta = 120
-        elif delta == 0 and getattr(event, "num", None) == 5:
-            delta = -120
-        if delta == 0:
-            return "break"
-        _queue_native_scroll(canvas, delta)
-        return "break"
-
-    root.bind_all("<MouseWheel>", _on_mousewheel, add="+")
-    root.bind_all("<Button-4>", _on_mousewheel, add="+")
-    root.bind_all("<Button-5>", _on_mousewheel, add="+")
-    root._vera_scroll_bound = True
+    def hide_over(self):
+        self.setVisible(False)
 
 
 # ---------------------------------------------------------------------------
 # Main build function
 # ---------------------------------------------------------------------------
 
-def build_ui(root, state: dict, callbacks: dict, constants: dict):
+def build_ui(window, state: dict, callbacks: dict, constants: dict):
     HOTKEY_CHOICES = constants["HOTKEY_CHOICES"]
     LANG_CHOICES = constants["LANG_CHOICES"]
 
-    # -- Unpack state (identical to original) --
-    mode = state["mode"]
-    language = state["language"]
-    seconds = state["seconds"]
-    hotkey = state["hotkey"]
-    holdkey = state["holdkey"]
-    hotkey_display = state["hotkey_display"]
+    # -- Unpack state --
+    mode            = state["mode"]
+    language        = state["language"]
+    seconds         = state["seconds"]
+    hotkey          = state["hotkey"]
+    holdkey         = state["holdkey"]
+    hotkey_display  = state["hotkey_display"]
     holdkey_display = state["holdkey_display"]
-    search_engine = state["search_engine"]
+    search_engine   = state["search_engine"]
     confirm_actions = state["confirm_actions"]
     ptt_beep_volume = state["ptt_beep_volume"]
     tts_output_device = state["tts_output_device"]
     tts_device_choices = state["tts_device_choices"]
-    tts_voice = state["tts_voice"]
+    tts_voice       = state["tts_voice"]
     tts_voice_choices = state["tts_voice_choices"]
     personality_mode = state["personality_mode"]
-    spotify_media = state["spotify_media"]
+    spotify_media   = state["spotify_media"]
     spotify_requires = state["spotify_requires"]
     spotify_keywords = state["spotify_keywords"]
-    status_var = state["status_var"]
-    transcript_var = state["transcript_var"]
+    status_var      = state["status_var"]
+    transcript_var  = state["transcript_var"]
+    news_source     = state["news_source"]
+    birthday_month  = state["birthday_month"]
+    birthday_day    = state["birthday_day"]
 
-    app_name_var = state["app_name_var"]
-    app_cmd_var = state["app_cmd_var"]
-    alias_var = state["alias_var"]
+    app_name_var    = state["app_name_var"]
+    app_cmd_var     = state["app_cmd_var"]
+    alias_var       = state["alias_var"]
     alias_target_var = state["alias_target_var"]
-    phrase_var = state["phrase_var"]
-    command_var = state["command_var"]
-    discord_ch_name_var = state["discord_ch_name_var"]
-    discord_ch_url_var = state["discord_ch_url_var"]
+    phrase_var      = state["phrase_var"]
+    command_var     = state["command_var"]
+    discord_ch_name_var  = state["discord_ch_name_var"]
+    discord_ch_url_var   = state["discord_ch_url_var"]
     discord_ch_server_var = state["discord_ch_server_var"]
     discord_srv_nickname_var = state["discord_srv_nickname_var"]
-    discord_srv_id_var = state["discord_srv_id_var"]
+    discord_srv_id_var   = state["discord_srv_id_var"]
     discord_bot_token_var = state["discord_bot_token_var"]
     discord_server_id_var = state["discord_server_id_var"]
-    gemini_api_key_var = state["gemini_api_key_var"]
-    keybind_phrase_var = state["keybind_phrase_var"]
-    keybind_key_var = state["keybind_key_var"]
-    keybind_count_var = state["keybind_count_var"]
+    gemini_api_key_var   = state["gemini_api_key_var"]
+    keybind_phrase_var   = state["keybind_phrase_var"]
+    keybind_key_var      = state["keybind_key_var"]
+    keybind_count_var    = state["keybind_count_var"]
 
-    # -- Unpack callbacks (identical to original) --
-    _load_logo = callbacks["load_logo"]
-    _save = callbacks["save"]
-    _run_now = callbacks["run_now"]
-    _install_deps = callbacks["install_deps"]
-    _start_background = callbacks["start_background"]
-    _stop_background = callbacks["stop_background"]
-    _check_for_updates = callbacks["check_for_updates"]
-    _create_bug_report = callbacks["create_bug_report"]
-    _export_transcripts = callbacks["export_transcripts"]
-    _clear_pycache = callbacks["clear_pycache"]
-    _create_shortcuts = callbacks["create_shortcuts"]
-    _add_app = callbacks["add_app"]
-    _remove_app = callbacks["remove_app"]
-    _test_app = callbacks["test_app"]
-    _import_steam = callbacks["import_steam"]
-    _add_alias = callbacks["add_alias"]
-    _remove_alias = callbacks["remove_alias"]
-    _add_action = callbacks["add_action"]
-    _remove_action = callbacks["remove_action"]
-    _record_hotkey = callbacks["record_hotkey"]
-    _record_hold_key = callbacks["record_hold_key"]
-    _add_discord_channel = callbacks["add_discord_channel"]
+    # -- Unpack callbacks --
+    _load_logo           = callbacks["load_logo"]
+    _save                = callbacks["save"]
+    _run_now             = callbacks["run_now"]
+    _install_deps        = callbacks["install_deps"]
+    _start_background    = callbacks["start_background"]
+    _stop_background     = callbacks["stop_background"]
+    _check_for_updates   = callbacks["check_for_updates"]
+    _create_bug_report   = callbacks["create_bug_report"]
+    _export_transcripts  = callbacks["export_transcripts"]
+    _clear_pycache       = callbacks["clear_pycache"]
+    _create_shortcuts    = callbacks["create_shortcuts"]
+    _add_app             = callbacks["add_app"]
+    _remove_app          = callbacks["remove_app"]
+    _test_app            = callbacks["test_app"]
+    _import_steam        = callbacks["import_steam"]
+    _add_alias           = callbacks["add_alias"]
+    _remove_alias        = callbacks["remove_alias"]
+    _add_action          = callbacks["add_action"]
+    _remove_action       = callbacks["remove_action"]
+    _record_hotkey       = callbacks["record_hotkey"]
+    _record_hold_key     = callbacks["record_hold_key"]
+    _add_discord_channel    = callbacks["add_discord_channel"]
     _remove_discord_channel = callbacks["remove_discord_channel"]
-    _add_discord_server = callbacks["add_discord_server"]
-    _remove_discord_server = callbacks["remove_discord_server"]
-    _add_keybind = callbacks["add_keybind"]
-    _remove_keybind = callbacks["remove_keybind"]
-    _record_keybind_key = callbacks["record_keybind_key"]
-    _on_mode_change = callbacks["mode_changed"]
-
-    def _toggle_theme():
-        new_mode = "dark" if state["theme_var"].get() else "light"
-        ctk.set_appearance_mode(new_mode)
+    _add_discord_server     = callbacks["add_discord_server"]
+    _remove_discord_server  = callbacks["remove_discord_server"]
+    _add_keybind         = callbacks["add_keybind"]
+    _remove_keybind      = callbacks["remove_keybind"]
+    _record_keybind_key  = callbacks["record_keybind_key"]
+    _on_mode_change      = callbacks["mode_changed"]
 
     # =====================================================================
-    # TABVIEW  (4 tabs)
+    # Central widget + outer layout
     # =====================================================================
-    tabview = ctk.CTkTabview(root)
-    tabview.pack(fill="both", expand=True, padx=10, pady=(10, 0))
-    tabview.add("Home")
-    tabview.add("Settings")
-    tabview.add("Apps")
-    tabview.add("Integrations")
-    tabview.add("Discord")
-    tabview.add("Training")
-    tabview.set("Home")
+    central = QWidget()
+    central.setStyleSheet(f"background-color: {_BG};")
+    window.setCentralWidget(central)
+    outer_vl = QVBoxLayout(central)
+    outer_vl.setContentsMargins(0, 0, 0, 0)
+    outer_vl.setSpacing(0)
+
+    # =====================================================================
+    # TAB WIDGET
+    # =====================================================================
+    tabs = QTabWidget()
+    tabs.setStyleSheet(f"""
+        QTabWidget::pane {{ border: none; background: {_BG}; }}
+        QTabBar::tab {{
+            background: #2b2b2b; color: #aaaaaa;
+            padding: 8px 16px; border: none;
+        }}
+        QTabBar::tab:selected {{ background: {_BG}; color: #ffffff; border-bottom: 2px solid {_ACCENT}; }}
+        QTabBar::tab:hover {{ background: #333333; }}
+    """)
+    outer_vl.addWidget(tabs, stretch=1)
 
     # =====================================================================
     # HOME TAB
     # =====================================================================
-    home_scroll = _make_scrollable(tabview.tab("Home"))
+    home_area, home_inner, home_vl = _scrollable_tab()
+    tabs.addTab(home_area, "Home")
 
-    # -- Logo --
-    logo_img = _load_logo()
-    if logo_img is not None:
-        logo_label = ctk.CTkLabel(home_scroll, image=logo_img, text="", bg_color="transparent")
-        logo_label.pack(pady=(10, 2))
-        ctk.CTkLabel(home_scroll, text="V  E  R  A", font=("Segoe UI", 24, "bold"), text_color=("#4a7c59", "#a8d5b5"), bg_color="transparent").pack(pady=(0, 6))
+    # Logo
+    logo_path = _load_logo()
+    if logo_path:
+        logo_lbl = QLabel()
+        px = QPixmap(logo_path)
+        if not px.isNull():
+            logo_lbl.setPixmap(px.scaled(140, 140, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            logo_lbl.setAlignment(Qt.AlignCenter)
+            home_vl.addWidget(logo_lbl)
+    title_lbl = QLabel("V  E  R  A")
+    title_lbl.setAlignment(Qt.AlignCenter)
+    title_lbl.setStyleSheet("font-size: 24px; font-weight: bold; color: #a8d5b5;")
+    home_vl.addWidget(title_lbl)
 
-    # -- Primary Controls (swap based on mode) --
-    _section_header(home_scroll, "Controls")
-    ctrl_card = _card(home_scroll)
+    # Controls section
+    for w in _section_label("Controls"):
+        home_vl.addWidget(w)
 
-    # Background controls (hold-to-talk / hotkey modes)
-    bg_ctrl_row = _card_row(ctrl_card)
-    _primary_btn(bg_ctrl_row, text="Start Listening", command=_start_background,
-                 width=160).pack(side="left", padx=4)
-    _danger_btn(bg_ctrl_row, text="Stop Listening", command=_stop_background,
-                width=140).pack(side="left", padx=4)
+    ctrl_card = _card_frame()
+    ctrl_vl = QVBoxLayout(ctrl_card)
+    ctrl_vl.setContentsMargins(12, 8, 12, 8)
 
-    # Timed mic controls
-    mic_ctrl_row = _card_row(ctrl_card)
-    _primary_btn(mic_ctrl_row, text="Run Now", command=_run_now,
-                 width=160).pack(side="left", padx=4)
+    bg_ctrl_row = _hrow(
+        _primary_btn("Start Listening", _start_background),
+        _danger_btn("Stop Listening", _stop_background),
+    )
+    ctrl_vl.addWidget(bg_ctrl_row)
 
-    def _update_controls(*_args):
-        current = mode.get()
-        if current == "mic":
-            bg_ctrl_row.pack_forget()
-            mic_ctrl_row.pack(fill="x", padx=PAD_CARD, pady=4)
-        elif current == "wake":
-            bg_ctrl_row.pack_forget()
-            mic_ctrl_row.pack_forget()
+    mic_ctrl_row = _hrow(_primary_btn("Run Now", _run_now))
+    ctrl_vl.addWidget(mic_ctrl_row)
+
+    def _update_controls():
+        m = mode.get()
+        if m == "mic":
+            bg_ctrl_row.setVisible(False)
+            mic_ctrl_row.setVisible(True)
+        elif m == "wake":
+            bg_ctrl_row.setVisible(False)
+            mic_ctrl_row.setVisible(False)
         else:
-            mic_ctrl_row.pack_forget()
-            bg_ctrl_row.pack(fill="x", padx=PAD_CARD, pady=4)
+            mic_ctrl_row.setVisible(False)
+            bg_ctrl_row.setVisible(True)
 
-    mode.trace_add("write", _update_controls)
+    mode.trace_add("write", lambda *_: _update_controls())
     _update_controls()
+    home_vl.addWidget(ctrl_card)
 
-    # -- Transcript History --
-    _section_header(home_scroll, "Transcript History",
-                    "Recent voice commands you've spoken.")
-    history_textbox = ctk.CTkTextbox(home_scroll, height=180, state="disabled",
-                                     corner_radius=8)
-    history_textbox.pack(fill="x", padx=PAD_OUTER, pady=(0, 10))
+    # Transcript History
+    for w in _section_label("Transcript History", "Recent voice commands you've spoken."):
+        home_vl.addWidget(w)
+    history_textbox = QTextEdit()
+    history_textbox.setReadOnly(True)
+    history_textbox.setFixedHeight(180)
+    history_textbox.setStyleSheet(
+        f"background-color: #262626; color: {_TEXT}; border-radius: 8px; font-size: 12px;"
+    )
+    home_vl.addWidget(history_textbox)
 
-    # -- Community --
-    _section_header(home_scroll, "Community", "Join the VERA Discord server.")
-    community_card = _card(home_scroll)
-    community_row = _card_row(community_card)
-    _primary_btn(
-        community_row,
-        text="Join the Discord",
-        command=lambda: __import__("webbrowser").open("https://discord.gg/DCdHVEchet"),
-        width=160,
-    ).pack(side="left", padx=4)
+    # Community
+    for w in _section_label("Community", "Join the VERA Discord server."):
+        home_vl.addWidget(w)
+    comm_card = _card_frame()
+    comm_vl = QVBoxLayout(comm_card)
+    comm_vl.setContentsMargins(12, 8, 12, 8)
+    comm_vl.addWidget(_hrow(_primary_btn("Join the Discord",
+        lambda: __import__("webbrowser").open("https://discord.gg/DCdHVEchet"))))
+    home_vl.addWidget(comm_card)
+    home_vl.addStretch()
 
     # =====================================================================
     # SETTINGS TAB
     # =====================================================================
-    settings_scroll = _make_scrollable(tabview.tab("Settings"))
+    settings_area, _, settings_vl = _scrollable_tab()
+    tabs.addTab(settings_area, "Settings")
 
-    # -- Listening Mode --
-    _section_header(settings_scroll, "Listening Mode",
-                    "Choose how VERA listens for your voice commands.")
-    mode_card = _card(settings_scroll)
+    # Listening Mode
+    for w in _section_label("Listening Mode", "Choose how VERA listens for your voice commands."):
+        settings_vl.addWidget(w)
+    mode_card = _card_frame()
+    mode_cl = QVBoxLayout(mode_card)
+    mode_cl.setContentsMargins(12, 10, 12, 10)
 
-    mode_row = _card_row(mode_card)
-    ctk.CTkRadioButton(mode_row, text="Hold-to-talk", variable=mode,
-                       value="hold", command=_on_mode_change).pack(side="left", padx=(0, 16))
-    ctk.CTkRadioButton(mode_row, text="Toggle-to-talk", variable=mode,
-                       value="toggle", command=_on_mode_change).pack(side="left", padx=(0, 16))
-    ctk.CTkRadioButton(mode_row, text="Wake word", variable=mode,
-                       value="wake",
-                       command=_on_mode_change).pack(side="left")
+    _SEG_ACTIVE = f"""
+        QPushButton {{
+            background-color: {_ACCENT}; color: #ffffff;
+            border: none; padding: 6px 18px; font-size: 12px; font-weight: bold;
+        }}
+    """
+    _SEG_INACTIVE = """
+        QPushButton {
+            background-color: transparent; color: #aaaaaa;
+            border: none; padding: 6px 18px; font-size: 12px;
+        }
+        QPushButton:hover { color: #ffffff; background-color: #383838; }
+    """
 
-    # -- Recording Settings --
-    _section_header(settings_scroll, "Recording Settings",
-                    "Configure timing, language, and activation keys.")
-    rec_card = _card(settings_scroll)
+    seg_container = QWidget()
+    seg_container.setStyleSheet("background-color: #1a1a1a; border-radius: 8px;")
+    seg_container.setFixedHeight(34)
+    seg_container.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    seg_layout = QHBoxLayout(seg_container)
+    seg_layout.setContentsMargins(3, 2, 3, 2)
+    seg_layout.setSpacing(2)
 
-    rec_r1 = _card_row(rec_card)
-    ctk.CTkLabel(rec_r1, text="Seconds", width=120).pack(side="left")
-    ctk.CTkEntry(rec_r1, textvariable=seconds, width=80).pack(
-        side="left", padx=(0, 20))
-    ctk.CTkLabel(rec_r1, text="Language", width=80).pack(side="left")
-    ctk.CTkOptionMenu(rec_r1, variable=language, values=LANG_CHOICES,
-                      width=140).pack(side="left")
+    seg_hold   = QPushButton("Hold-to-talk")
+    seg_toggle = QPushButton("Toggle-to-talk")
+    seg_wake   = QPushButton("Wake word")
+    for btn in (seg_hold, seg_toggle, seg_wake):
+        btn.setFlat(True)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        seg_layout.addWidget(btn)
 
-    rec_r2 = _card_row(rec_card)
-    ctk.CTkLabel(rec_r2, text="Toggle key", width=120).pack(side="left")
-    ctk.CTkEntry(rec_r2, textvariable=hotkey_display, width=160).pack(
-        side="left", padx=(0, 10))
-    _secondary_btn(rec_r2, text="Record",
-                   command=lambda: _record_hotkey(hotkey),
-                   width=90).pack(side="left")
+    def _seg_select(active_mode: str):
+        for btn, m in ((seg_hold, "hold"), (seg_toggle, "toggle"), (seg_wake, "wake")):
+            btn.setStyleSheet(_SEG_ACTIVE if m == active_mode else _SEG_INACTIVE)
 
-    rec_r3 = _card_row(rec_card)
-    ctk.CTkLabel(rec_r3, text="Hold key", width=120).pack(side="left")
-    ctk.CTkEntry(rec_r3, textvariable=holdkey_display, width=160).pack(
-        side="left", padx=(0, 10))
-    _secondary_btn(rec_r3, text="Record",
-                   command=lambda: _record_hold_key(holdkey),
-                   width=90).pack(side="left")
+    def _sync_mode_radios():
+        _seg_select(mode.get())
 
-    rec_r4 = _card_row(rec_card)
-    ctk.CTkLabel(rec_r4, text="Search Engine", width=120).pack(side="left")
-    ctk.CTkEntry(rec_r4, textvariable=search_engine, width=340).pack(
-        side="left")
+    _sync_mode_radios()
 
-    rec_r5 = _card_row(rec_card)
-    ctk.CTkLabel(rec_r5, text="Beep Volume", width=120).pack(side="left")
-    beep_vol_label = ctk.CTkLabel(rec_r5, text=f"{ptt_beep_volume.get()}%", width=40)
-    ctk.CTkSlider(rec_r5, from_=0, to=100, number_of_steps=100,
-                  variable=ptt_beep_volume,
-                  command=lambda v: beep_vol_label.configure(text=f"{int(v)}%"),
-                  width=200).pack(side="left", padx=(0, 8))
-    beep_vol_label.pack(side="left")
+    def _on_radio_hold():
+        mode.set("hold")
+        _seg_select("hold")
+        _on_mode_change()
 
-    rec_r6 = _card_row(rec_card)
-    ctk.CTkLabel(rec_r6, text="Voice Output", width=120).pack(side="left")
-    ctk.CTkOptionMenu(rec_r6, variable=tts_output_device,
-                      values=tts_device_choices, width=260).pack(side="left")
-    ctk.CTkLabel(rec_r6, text="  Select your virtual mic (e.g. VB-Cable) to route TTS to Discord",
-                 font=FONT_HELP, text_color=COLOR_HELP).pack(side="left", padx=(8, 0))
+    def _on_radio_toggle():
+        mode.set("toggle")
+        _seg_select("toggle")
+        _on_mode_change()
 
-    rec_r7 = _card_row(rec_card)
-    ctk.CTkLabel(rec_r7, text="Voice", width=120).pack(side="left")
-    ctk.CTkOptionMenu(rec_r7, variable=tts_voice,
-                      values=tts_voice_choices, width=160).pack(side="left")
-    ctk.CTkLabel(rec_r7, text="  Choose VERA's voice (takes effect immediately)",
-                 font=FONT_HELP, text_color=COLOR_HELP).pack(side="left", padx=(8, 0))
+    def _on_radio_wake():
+        mode.set("wake")
+        _seg_select("wake")
+        _on_mode_change()
 
-    # -- General Options --
-    _section_header(settings_scroll, "General Options")
-    opt_card = _card(settings_scroll)
+    seg_hold.clicked.connect(_on_radio_hold)
+    seg_toggle.clicked.connect(_on_radio_toggle)
+    seg_wake.clicked.connect(_on_radio_wake)
 
-    ctk.CTkCheckBox(opt_card, text="Confirm before running actions",
-                    variable=confirm_actions).pack(
-        anchor="w", padx=PAD_CARD, pady=(10, 4))
-    ctk.CTkCheckBox(opt_card, text="Dark mode", variable=state["theme_var"],
-                    command=_toggle_theme).pack(
-        anchor="w", padx=PAD_CARD, pady=(4, 10))
+    seg_row = QHBoxLayout()
+    seg_row.setContentsMargins(0, 0, 0, 0)
+    seg_row.addWidget(seg_container)
+    seg_row.addStretch()
+    seg_row_w = QWidget()
+    seg_row_w.setLayout(seg_row)
+    mode_cl.addWidget(seg_row_w)
+    settings_vl.addWidget(mode_card)
 
-    # -- Personality --
-    _section_header(settings_scroll, "Personality",
-                    "Choose how VERA speaks to you.")
-    personality_card = _card(settings_scroll)
-    personality_row = _card_row(personality_card)
-    ctk.CTkLabel(personality_row, text="Mode", width=120).pack(side="left")
+    # Recording Settings
+    for w in _section_label("Recording Settings", "Configure timing, language, and activation keys."):
+        settings_vl.addWidget(w)
+    rec_card = _card_frame()
+    rec_vl = QVBoxLayout(rec_card)
+    rec_vl.setContentsMargins(12, 8, 12, 8)
+    rec_vl.setSpacing(6)
+
+    # Seconds + Language row
+    sec_lbl = QLabel("Seconds")
+    sec_lbl.setFixedWidth(120)
+    sec_lbl.setStyleSheet(f"color: {_TEXT};")
+    sec_edit = _make_entry(80)
+    sec_edit.setText(seconds.get())
+    sec_edit.textChanged.connect(seconds.set)
+    lang_lbl = QLabel("Language")
+    lang_lbl.setFixedWidth(80)
+    lang_lbl.setStyleSheet(f"color: {_TEXT};")
+    lang_combo = _make_combo(LANG_CHOICES, 140)
+    lang_combo.setCurrentText(language.get())
+    lang_combo.currentTextChanged.connect(language.set)
+    rec_vl.addWidget(_hrow(sec_lbl, sec_edit, lang_lbl, lang_combo))
+
+    # Hotkey row
+    hk_lbl = QLabel("Toggle key")
+    hk_lbl.setFixedWidth(120)
+    hk_lbl.setStyleSheet(f"color: {_TEXT};")
+    hk_edit = _make_entry(160)
+    hk_edit.setText(hotkey_display.get())
+
+    def _on_hk_text_changed(text):
+        hotkey_display.set(text)
+
+    hk_edit.textChanged.connect(_on_hk_text_changed)
+
+    def _hk_record():
+        _record_hotkey(hotkey)
+        hk_edit.setText(hotkey_display.get())
+
+    hk_rec_btn = _secondary_btn("Record", _hk_record)
+    rec_vl.addWidget(_hrow(hk_lbl, hk_edit, hk_rec_btn))
+
+    # Hold key row
+    hold_lbl = QLabel("Hold key")
+    hold_lbl.setFixedWidth(120)
+    hold_lbl.setStyleSheet(f"color: {_TEXT};")
+    hold_edit = _make_entry(160)
+    hold_edit.setText(holdkey_display.get())
+
+    def _on_hold_text_changed(text):
+        holdkey_display.set(text)
+
+    hold_edit.textChanged.connect(_on_hold_text_changed)
+
+    def _hold_record():
+        _record_hold_key(holdkey)
+        hold_edit.setText(holdkey_display.get())
+
+    hold_rec_btn = _secondary_btn("Record", _hold_record)
+    rec_vl.addWidget(_hrow(hold_lbl, hold_edit, hold_rec_btn))
+
+    # Search engine row
+    se_lbl = QLabel("Search Engine")
+    se_lbl.setFixedWidth(120)
+    se_lbl.setStyleSheet(f"color: {_TEXT};")
+    se_edit = _make_entry(340)
+    se_edit.setText(search_engine.get())
+    se_edit.textChanged.connect(search_engine.set)
+    rec_vl.addWidget(_hrow(se_lbl, se_edit))
+
+    # Beep volume row
+    bv_lbl = QLabel("Beep Volume")
+    bv_lbl.setFixedWidth(120)
+    bv_lbl.setStyleSheet(f"color: {_TEXT};")
+    bv_slider = QSlider(Qt.Horizontal)
+    bv_slider.setRange(0, 100)
+    bv_slider.setValue(int(ptt_beep_volume.get()))
+    bv_slider.setFixedWidth(200)
+    bv_slider.setStyleSheet(f"QSlider::groove:horizontal {{ height: 4px; background: #444; border-radius: 2px; }}"
+                             f"QSlider::handle:horizontal {{ background: {_ACCENT}; width: 14px; height: 14px; border-radius: 7px; margin: -5px 0; }}"
+                             f"QSlider::sub-page:horizontal {{ background: {_ACCENT}; border-radius: 2px; }}")
+    bv_val_lbl = QLabel(f"{ptt_beep_volume.get()}%")
+    bv_val_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 40px;")
+
+    def _on_bv_change(v):
+        ptt_beep_volume.set(v)
+        bv_val_lbl.setText(f"{v}%")
+
+    bv_slider.valueChanged.connect(_on_bv_change)
+    rec_vl.addWidget(_hrow(bv_lbl, bv_slider, bv_val_lbl))
+
+    # Voice output row
+    vo_lbl = QLabel("Voice Output")
+    vo_lbl.setFixedWidth(120)
+    vo_lbl.setStyleSheet(f"color: {_TEXT};")
+    vo_combo = _make_combo(tts_device_choices, 260)
+    vo_combo.setCurrentText(tts_output_device.get() or "Default")
+    vo_combo.currentTextChanged.connect(tts_output_device.set)
+    vo_hint = QLabel("  Select your virtual mic (e.g. VB-Cable) to route TTS to Discord")
+    vo_hint.setStyleSheet(f"color: {_MUTED}; font-size: 11px;")
+    rec_vl.addWidget(_hrow(vo_lbl, vo_combo, vo_hint))
+
+    # Voice row
+    voice_lbl = QLabel("Voice")
+    voice_lbl.setFixedWidth(120)
+    voice_lbl.setStyleSheet(f"color: {_TEXT};")
+    voice_combo = _make_combo(tts_voice_choices, 160)
+    voice_combo.setCurrentText(tts_voice.get())
+    voice_combo.currentTextChanged.connect(tts_voice.set)
+    voice_hint = QLabel("  Choose VERA's voice (takes effect immediately)")
+    voice_hint.setStyleSheet(f"color: {_MUTED}; font-size: 11px;")
+    rec_vl.addWidget(_hrow(voice_lbl, voice_combo, voice_hint))
+    settings_vl.addWidget(rec_card)
+
+    # General Options
+    for w in _section_label("General Options"):
+        settings_vl.addWidget(w)
+    opt_card = _card_frame()
+    opt_vl = QVBoxLayout(opt_card)
+    opt_vl.setContentsMargins(12, 8, 12, 8)
+    confirm_row = QWidget()
+    confirm_row_l = QHBoxLayout(confirm_row)
+    confirm_row_l.setContentsMargins(0, 0, 0, 0)
+    confirm_row_l.setSpacing(10)
+    confirm_chk = QCheckBox("Confirm before running actions")
+    confirm_chk.setStyleSheet(_CHECK_STYLE)
+    confirm_chk.setChecked(bool(confirm_actions.get()))
+    confirm_chk.stateChanged.connect(lambda s: confirm_actions.set(s == Qt.Checked.value))
+    confirm_desc = QLabel("VERA will ask you to confirm before opening apps or running commands.")
+    confirm_desc.setStyleSheet(f"color: {_MUTED}; font-size: 11px;")
+    confirm_desc.setWordWrap(True)
+    confirm_row_l.addWidget(confirm_chk)
+    confirm_row_l.addWidget(confirm_desc, 1)
+    opt_vl.addWidget(confirm_row)
+    settings_vl.addWidget(opt_card)
+
+    # Personality
+    for w in _section_label("Personality", "Choose how VERA speaks to you."):
+        settings_vl.addWidget(w)
+    pers_card = _card_frame()
+    pers_vl = QVBoxLayout(pers_card)
+    pers_vl.setContentsMargins(12, 8, 12, 8)
     try:
         from license import is_premium as _is_premium
         _premium = _is_premium()
     except Exception:
         _premium = False
-    if _premium:
-        ctk.CTkOptionMenu(
-            personality_row,
-            variable=personality_mode,
-            values=["default", "professional", "offensive"],
-            width=160,
-        ).pack(side="left")
-    else:
-        ctk.CTkOptionMenu(
-            personality_row,
-            variable=personality_mode,
-            values=["default", "professional"],
-            width=160,
-        ).pack(side="left")
-        ctk.CTkLabel(
-            personality_row,
-            text="  Offensive mode requires a Premium license",
-            font=FONT_HELP,
-            text_color=COLOR_HELP,
-        ).pack(side="left", padx=(8, 0))
+    pers_choices = ["default", "professional", "offensive"] if _premium else ["default", "professional"]
+    pers_combo = _make_combo(pers_choices, 160)
+    pers_combo.setCurrentText(personality_mode.get())
+    pers_combo.currentTextChanged.connect(personality_mode.set)
+    pers_row = _hrow(QLabel("Mode"), pers_combo)
+    pers_row.findChildren(QLabel)[0].setStyleSheet(f"color: {_TEXT}; min-width: 120px;")
+    if not _premium:
+        pers_note = QLabel("  Offensive mode requires a Premium license")
+        pers_note.setStyleSheet(f"color: {_MUTED}; font-size: 11px;")
+        pers_row.layout().addWidget(pers_note)
+    pers_vl.addWidget(pers_row)
+    settings_vl.addWidget(pers_card)
 
-    # -- Spotify --
-    _section_header(settings_scroll, "Spotify",
-                    "Control Spotify playback with voice commands like "
-                    "'play', 'pause', 'next'.")
-    spot_card = _card(settings_scroll)
+    # Spotify
+    for w in _section_label("Spotify", "Control Spotify playback with voice commands like 'play', 'pause', 'next'."):
+        settings_vl.addWidget(w)
+    spot_card = _card_frame()
+    spot_vl = QVBoxLayout(spot_card)
+    spot_vl.setContentsMargins(12, 8, 12, 8)
+    spot_media_chk = QCheckBox("Enable Spotify media controls")
+    spot_media_chk.setStyleSheet(_CHECK_STYLE)
+    spot_media_chk.setChecked(bool(spotify_media.get()))
+    spot_media_chk.stateChanged.connect(lambda s: spotify_media.set(s == Qt.Checked.value))
+    spot_vl.addWidget(spot_media_chk)
+    spot_req_chk = QCheckBox("Require word 'spotify' in command")
+    spot_req_chk.setStyleSheet(_CHECK_STYLE)
+    spot_req_chk.setChecked(bool(spotify_requires.get()))
+    spot_req_chk.stateChanged.connect(lambda s: spotify_requires.set(s == Qt.Checked.value))
+    spot_vl.addWidget(spot_req_chk)
+    spot_kw_lbl = QLabel("Spotify keywords")
+    spot_kw_lbl.setStyleSheet(f"color: {_TEXT};")
+    spot_kw_edit = _make_entry(240)
+    spot_kw_edit.setText(spotify_keywords.get())
+    spot_kw_edit.textChanged.connect(spotify_keywords.set)
+    spot_vl.addWidget(_hrow(spot_kw_lbl, spot_kw_edit))
+    settings_vl.addWidget(spot_card)
 
-    ctk.CTkCheckBox(spot_card, text="Enable Spotify media controls",
-                    variable=spotify_media).pack(
-        anchor="w", padx=PAD_CARD, pady=(10, 4))
-    ctk.CTkCheckBox(spot_card, text="Require word 'spotify' in command",
-                    variable=spotify_requires).pack(
-        anchor="w", padx=PAD_CARD, pady=4)
+    # News
+    for w in _section_label("News", "Choose your preferred news source for 'give me the news'."):
+        settings_vl.addWidget(w)
+    news_card = _card_frame()
+    news_vl = QVBoxLayout(news_card)
+    news_vl.setContentsMargins(12, 8, 12, 8)
+    news_src_lbl = QLabel("Source")
+    news_src_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 120px;")
+    news_combo = _make_combo(["BBC", "Reuters", "NPR", "AP News", "The Guardian", "Al Jazeera"], 160)
+    news_combo.setCurrentText(news_source.get())
+    news_combo.currentTextChanged.connect(news_source.set)
+    news_vl.addWidget(_hrow(news_src_lbl, news_combo))
+    settings_vl.addWidget(news_card)
 
-    spot_kw_row = _card_row(spot_card)
-    ctk.CTkLabel(spot_kw_row, text="Spotify keywords").pack(side="left")
-    ctk.CTkEntry(spot_kw_row, textvariable=spotify_keywords,
-                 width=240).pack(side="left", padx=(10, 0))
+    # Birthday
+    for w in _section_label("Birthday", "VERA will wish you happy birthday on startup."):
+        settings_vl.addWidget(w)
+    bday_card = _card_frame()
+    bday_vl = QVBoxLayout(bday_card)
+    bday_vl.setContentsMargins(12, 8, 12, 8)
+    bday_month_lbl = QLabel("Month")
+    bday_month_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 80px;")
+    bday_month_combo = _make_combo([""] + [str(i) for i in range(1, 13)], 80)
+    bday_month_combo.setCurrentText(birthday_month.get())
+    bday_month_combo.currentTextChanged.connect(birthday_month.set)
+    bday_day_lbl = QLabel("Day")
+    bday_day_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 40px;")
+    bday_day_combo = _make_combo([""] + [str(d) for d in range(1, 32)], 80)
+    bday_day_combo.setCurrentText(birthday_day.get())
+    bday_day_combo.currentTextChanged.connect(birthday_day.set)
+    bday_hint = QLabel("  Leave blank to disable")
+    bday_hint.setStyleSheet(f"color: {_MUTED}; font-size: 11px;")
+    bday_vl.addWidget(_hrow(bday_month_lbl, bday_month_combo, bday_day_lbl, bday_day_combo, bday_hint))
+    settings_vl.addWidget(bday_card)
 
-    # -- News --
-    _section_header(settings_scroll, "News",
-                    "Choose your preferred news source for 'give me the news'.")
-    news_source = state["news_source"]
-    news_card = _card(settings_scroll)
-    news_row = _card_row(news_card)
-    ctk.CTkLabel(news_row, text="Source", width=120).pack(side="left")
-    ctk.CTkOptionMenu(
-        news_row,
-        variable=news_source,
-        values=["BBC", "Reuters", "NPR", "AP News", "The Guardian", "Al Jazeera"],
-        width=160,
-    ).pack(side="left")
-
-    # -- Birthday --
-    _section_header(settings_scroll, "Birthday",
-                    "VERA will wish you happy birthday on startup. "
-                    "You can also say 'my birthday is October 15th'.")
-    birthday_month = state["birthday_month"]
-    birthday_day = state["birthday_day"]
-    bday_card = _card(settings_scroll)
-    bday_row = _card_row(bday_card)
-    ctk.CTkLabel(bday_row, text="Month", width=80).pack(side="left")
-    ctk.CTkOptionMenu(
-        bday_row,
-        variable=birthday_month,
-        values=["", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
-        width=80,
-    ).pack(side="left", padx=(0, 16))
-    ctk.CTkLabel(bday_row, text="Day", width=40).pack(side="left")
-    ctk.CTkOptionMenu(
-        bday_row,
-        variable=birthday_day,
-        values=[""] + [str(d) for d in range(1, 32)],
-        width=80,
-    ).pack(side="left")
-    ctk.CTkLabel(bday_row, text="  Leave blank to disable",
-                 font=FONT_HELP, text_color=COLOR_HELP).pack(side="left", padx=(12, 0))
-
-    # -- Utilities --
-    _section_header(settings_scroll, "Utilities")
-    util_card = _card(settings_scroll)
-
-    util_row1 = _card_row(util_card)
-    _secondary_btn(util_row1, text="Check Updates", command=_check_for_updates,
-                   width=130).pack(side="left", padx=4)
-    _secondary_btn(util_row1, text="Install Deps", command=_install_deps,
-                   width=130).pack(side="left", padx=4)
-
-    util_row2 = _card_row(util_card)
-    _muted_btn(util_row2, text="Bug Report", command=_create_bug_report,
-               width=130).pack(side="left", padx=4)
-    _muted_btn(util_row2, text="Export Transcripts", command=_export_transcripts,
-               width=150).pack(side="left", padx=4)
-    _danger_btn(util_row2, text="Delete Cache", command=_clear_pycache,
-                width=130).pack(side="left", padx=4)
-
-    util_row3 = _card_row(util_card)
-    _secondary_btn(util_row3, text="Add Desktop Shortcut", command=_create_shortcuts,
-                   width=180).pack(side="left", padx=4)
+    # Utilities
+    for w in _section_label("Utilities"):
+        settings_vl.addWidget(w)
+    util_card = _card_frame()
+    util_vl = QVBoxLayout(util_card)
+    util_vl.setContentsMargins(12, 8, 12, 8)
+    util_vl.addWidget(_hrow(
+        _secondary_btn("Check Updates", _check_for_updates),
+        _secondary_btn("Install Deps", _install_deps),
+        _secondary_btn("Add Desktop Shortcut", _create_shortcuts),
+    ))
+    util_vl.addWidget(_hrow(
+        _secondary_btn("Bug Report", _create_bug_report),
+        _secondary_btn("Export Transcripts", _export_transcripts),
+        _secondary_btn("Delete Cache", _clear_pycache),
+    ))
+    settings_vl.addWidget(util_card)
+    settings_vl.addStretch()
 
     # =====================================================================
     # APPS TAB
     # =====================================================================
-    apps_scroll = _make_scrollable(tabview.tab("Apps"))
+    apps_area, _, apps_vl = _scrollable_tab()
+    tabs.addTab(apps_area, "Apps")
 
-    # -- Registered Apps --
-    _section_header(apps_scroll, "Registered Apps",
-                    "Say 'open <app name>' to launch an app. "
-                    "Add them manually or import from Steam.")
+    for w in _section_label("Registered Apps", "Say 'open <app name>' to launch an app."):
+        apps_vl.addWidget(w)
+    apps_textbox = _make_listbox(6)
+    apps_vl.addWidget(apps_textbox)
 
-    import tkinter as _tk_apps
-    apps_frame = ctk.CTkFrame(apps_scroll, corner_radius=8)
-    apps_frame.pack(fill="x", padx=PAD_OUTER, pady=(2, 2))
-    apps_textbox = _tk_apps.Listbox(
-        apps_frame,
-        height=6,
-        selectmode="single",
-        activestyle="none",
-        exportselection=False,
-        bg="#262626",
-        fg="white",
-        selectbackground="#2563eb",
-        selectforeground="white",
-        relief="flat",
-        borderwidth=0,
-        highlightthickness=1,
-        highlightbackground="#404040",
-        highlightcolor="#2563eb",
-        font=("Segoe UI Semibold", 11),
-    )
-    apps_textbox.pack(fill="x", padx=8, pady=8)
-    def _apps_scroll(e):
-        apps_textbox.yview_scroll(-1 * (e.delta // 120), "units")
-        return "break"
-    apps_textbox.bind("<MouseWheel>", _apps_scroll)
+    app_card = _card_frame()
+    app_cvl = QVBoxLayout(app_card)
+    app_cvl.setContentsMargins(12, 8, 12, 8)
+    app_name_lbl = QLabel("App name")
+    app_name_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 100px;")
+    app_name_edit = _make_entry(240, "e.g. notepad")
+    app_name_edit.textChanged.connect(app_name_var.set)
+    app_cvl.addWidget(_hrow(app_name_lbl, app_name_edit))
+    app_cmd_lbl = QLabel("App command")
+    app_cmd_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 100px;")
+    app_cmd_edit = _make_entry(240, "e.g. notepad.exe")
+    app_cmd_edit.textChanged.connect(app_cmd_var.set)
+    app_cvl.addWidget(_hrow(app_cmd_lbl, app_cmd_edit))
+    apps_vl.addWidget(app_card)
+    apps_vl.addWidget(_hrow(
+        _primary_btn("Add App", _add_app),
+        _secondary_btn("Test App", _test_app),
+        _secondary_btn("Import Steam", _import_steam),
+        _danger_btn("Remove Selected", _remove_app),
+    ))
 
-    app_input_card = _card(apps_scroll)
+    for w in _section_label("App Aliases", "Create shortcuts — say the alias to launch the target app."):
+        apps_vl.addWidget(w)
+    aliases_textbox = _make_listbox(4)
+    apps_vl.addWidget(aliases_textbox)
 
-    app_r1 = _card_row(app_input_card)
-    ctk.CTkLabel(app_r1, text="App name", width=100).pack(side="left")
-    ctk.CTkEntry(app_r1, textvariable=app_name_var, width=240,
-                 placeholder_text="e.g. notepad").pack(
-        side="left", padx=(0, 10))
-
-    app_r2 = _card_row(app_input_card)
-    ctk.CTkLabel(app_r2, text="App command", width=100).pack(side="left")
-    ctk.CTkEntry(app_r2, textvariable=app_cmd_var, width=240,
-                 placeholder_text="e.g. notepad.exe").pack(
-        side="left", padx=(0, 10))
-
-    app_btns = _btn_row(apps_scroll)
-    _primary_btn(app_btns, text="Add App", command=_add_app,
-                 width=110).pack(side="left", padx=4)
-    _secondary_btn(app_btns, text="Test App", command=_test_app,
-                   width=110).pack(side="left", padx=4)
-    _secondary_btn(app_btns, text="Import Steam", command=_import_steam,
-                   width=110).pack(side="left", padx=4)
-    _danger_btn(app_btns, text="Remove Selected", command=_remove_app,
-                width=130).pack(side="right", padx=4)
-
-    # -- App Aliases --
-    _section_header(apps_scroll, "App Aliases",
-                    "Create shortcuts \u2014 say the alias to launch "
-                    "the target app.")
-
-    import tkinter as _tk_alias
-    aliases_frame = ctk.CTkFrame(apps_scroll, corner_radius=8)
-    aliases_frame.pack(fill="x", padx=PAD_OUTER, pady=(2, 2))
-    aliases_textbox = _tk_alias.Listbox(
-        aliases_frame,
-        height=4,
-        selectmode="single",
-        activestyle="none",
-        exportselection=False,
-        bg="#262626",
-        fg="white",
-        selectbackground="#2563eb",
-        selectforeground="white",
-        relief="flat",
-        borderwidth=0,
-        highlightthickness=1,
-        highlightbackground="#404040",
-        highlightcolor="#2563eb",
-        font=("Segoe UI Semibold", 11),
-    )
-    aliases_textbox.pack(fill="x", padx=8, pady=8)
-    def _alias_scroll(e):
-        aliases_textbox.yview_scroll(-1 * (e.delta // 120), "units")
-        return "break"
-    aliases_textbox.bind("<MouseWheel>", _alias_scroll)
-
-    alias_input_card = _card(apps_scroll)
-
-    alias_r1 = _card_row(alias_input_card)
-    ctk.CTkLabel(alias_r1, text="Alias", width=100).pack(side="left")
-    ctk.CTkEntry(alias_r1, textvariable=alias_var, width=240,
-                 placeholder_text="e.g. browser").pack(
-        side="left", padx=(0, 10))
-
-    alias_r2 = _card_row(alias_input_card)
-    ctk.CTkLabel(alias_r2, text="Target app", width=100).pack(side="left")
-    ctk.CTkEntry(alias_r2, textvariable=alias_target_var, width=240,
-                 placeholder_text="e.g. chrome").pack(
-        side="left", padx=(0, 10))
-
-    alias_btns = _btn_row(apps_scroll)
-    _primary_btn(alias_btns, text="Add Alias", command=_add_alias,
-                 width=110).pack(side="left", padx=4)
-    _danger_btn(alias_btns, text="Remove Selected", command=_remove_alias,
-                width=130).pack(side="right", padx=4)
+    alias_card = _card_frame()
+    alias_cvl = QVBoxLayout(alias_card)
+    alias_cvl.setContentsMargins(12, 8, 12, 8)
+    alias_lbl = QLabel("Alias")
+    alias_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 100px;")
+    alias_edit = _make_entry(240, "e.g. browser")
+    alias_edit.textChanged.connect(alias_var.set)
+    alias_cvl.addWidget(_hrow(alias_lbl, alias_edit))
+    alias_tgt_lbl = QLabel("Target app")
+    alias_tgt_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 100px;")
+    alias_tgt_edit = _make_entry(240, "e.g. chrome")
+    alias_tgt_edit.textChanged.connect(alias_target_var.set)
+    alias_cvl.addWidget(_hrow(alias_tgt_lbl, alias_tgt_edit))
+    apps_vl.addWidget(alias_card)
+    apps_vl.addWidget(_hrow(
+        _primary_btn("Add Alias", _add_alias),
+        _danger_btn("Remove Selected", _remove_alias),
+    ))
+    apps_vl.addStretch()
 
     # =====================================================================
     # INTEGRATIONS TAB
     # =====================================================================
-    integ_scroll = _make_scrollable(tabview.tab("Integrations"))
+    integ_area, _, integ_vl = _scrollable_tab()
+    tabs.addTab(integ_area, "Integrations")
 
-    # -- AI (Groq) --
-    _section_header(
-        integ_scroll,
-        "AI Assistant",
-        "Use `ask <question>` to query AI.\nGet your free key at console.groq.com -> API Keys.",
-    )
-    ai_card = _card(integ_scroll)
+    for w in _section_label("AI Assistant", "Use `ask <question>` to query AI.\nGet your free key at console.groq.com -> API Keys."):
+        integ_vl.addWidget(w)
+    ai_card = _card_frame()
+    ai_cvl = QVBoxLayout(ai_card)
+    ai_cvl.setContentsMargins(12, 8, 12, 8)
+    ai_lbl = QLabel("API Key")
+    ai_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 120px;")
+    ai_edit = _make_entry(320, "Groq API key", password=True)
+    ai_edit.setText(gemini_api_key_var.get())
+    ai_edit.textChanged.connect(gemini_api_key_var.set)
+    ai_cvl.addWidget(_hrow(ai_lbl, ai_edit))
+    integ_vl.addWidget(ai_card)
 
-    ai_row = _card_row(ai_card)
-    ctk.CTkLabel(ai_row, text="API Key", width=120).pack(side="left")
-    ctk.CTkEntry(ai_row, textvariable=gemini_api_key_var, width=320,
-                 show="*",
-                 placeholder_text="Groq API key").pack(
-        side="left", padx=(0, 10))
+    for w in _section_label("Voice Actions", "Map a spoken phrase to a shell command.\nExample: `lock my computer` -> `rundll32.exe user32.dll,LockWorkStation`"):
+        integ_vl.addWidget(w)
+    actions_textbox = _make_listbox(6)
+    integ_vl.addWidget(actions_textbox)
 
-    # -- Voice Actions --
-    _section_header(
-        integ_scroll,
-        "Voice Actions",
-        "Map a spoken phrase to a shell command.\nExample: `lock my computer` -> `rundll32.exe user32.dll,LockWorkStation`",
-    )
+    act_card = _card_frame()
+    act_cvl = QVBoxLayout(act_card)
+    act_cvl.setContentsMargins(12, 8, 12, 8)
+    phrase_lbl = QLabel("Phrase")
+    phrase_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 100px;")
+    phrase_edit = _make_entry(300, "e.g. lock my computer")
+    phrase_edit.textChanged.connect(phrase_var.set)
+    act_cvl.addWidget(_hrow(phrase_lbl, phrase_edit))
+    cmd_lbl = QLabel("Command")
+    cmd_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 100px;")
+    cmd_edit = _make_entry(300, "e.g. rundll32.exe user32.dll,LockWorkStation")
+    cmd_edit.textChanged.connect(command_var.set)
+    act_cvl.addWidget(_hrow(cmd_lbl, cmd_edit))
+    integ_vl.addWidget(act_card)
+    integ_vl.addWidget(_hrow(
+        _primary_btn("Add Action", _add_action),
+        _danger_btn("Remove Selected", _remove_action),
+    ))
 
-    import tkinter as _tk_act
-    actions_frame = ctk.CTkFrame(integ_scroll, corner_radius=8)
-    actions_frame.pack(fill="x", padx=PAD_OUTER, pady=(2, 2))
-    actions_textbox = _tk_act.Listbox(
-        actions_frame,
-        height=6,
-        selectmode="single",
-        activestyle="none",
-        exportselection=False,
-        bg="#262626",
-        fg="white",
-        selectbackground="#2563eb",
-        selectforeground="white",
-        relief="flat",
-        borderwidth=0,
-        highlightthickness=1,
-        highlightbackground="#404040",
-        highlightcolor="#2563eb",
-        font=("Segoe UI Semibold", 11),
-    )
-    actions_textbox.pack(fill="x", padx=8, pady=8)
+    for w in _section_label("Key Binds", "Say a phrase to press a key (e.g. 'reload' → r)."):
+        integ_vl.addWidget(w)
+    warn_lbl = QLabel("⚠ Do not use in games protected by EAC or BattlEye — synthetic input may be flagged.")
+    warn_lbl.setStyleSheet(f"color: {_WARN_FG}; font-size: 11px;")
+    warn_lbl.setWordWrap(True)
+    integ_vl.addWidget(warn_lbl)
+    keybinds_textbox = _make_listbox(6)
+    integ_vl.addWidget(keybinds_textbox)
 
-    action_input_card = _card(integ_scroll)
-    action_input_card.pack_configure(pady=(2, 4))
+    kb_card = _card_frame()
+    kb_cvl = QVBoxLayout(kb_card)
+    kb_cvl.setContentsMargins(12, 8, 12, 8)
+    kb_phrase_lbl = QLabel("Phrase")
+    kb_phrase_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 100px;")
+    kb_phrase_edit = _make_entry(240, "e.g. reload")
+    kb_phrase_edit.textChanged.connect(keybind_phrase_var.set)
+    kb_cvl.addWidget(_hrow(kb_phrase_lbl, kb_phrase_edit))
+    kb_key_lbl = QLabel("Key")
+    kb_key_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 100px;")
+    kb_key_edit = _make_entry(180, "e.g. alt+n or x1 > q")
+    kb_key_edit.textChanged.connect(keybind_key_var.set)
 
-    act_r1 = _card_row(action_input_card)
-    ctk.CTkLabel(act_r1, text="Phrase", width=100).pack(side="left")
-    ctk.CTkEntry(act_r1, textvariable=phrase_var, width=300,
-                 placeholder_text="e.g. lock my computer").pack(
-        side="left", padx=(0, 10))
+    def _do_record_keybind():
+        _record_keybind_key(keybind_key_var)
+        kb_key_edit.setText(keybind_key_var.get())
 
-    act_r2 = _card_row(action_input_card)
-    ctk.CTkLabel(act_r2, text="Command", width=100).pack(side="left")
-    ctk.CTkEntry(
-        act_r2, textvariable=command_var, width=300,
-        placeholder_text="e.g. rundll32.exe user32.dll,LockWorkStation"
-    ).pack(side="left", padx=(0, 10))
-
-    action_btns = _btn_row(integ_scroll)
-    action_btns.pack_configure(pady=(4, PAD_SECTION))
-    _primary_btn(action_btns, text="Add Action", command=_add_action,
-                 width=130).pack(side="left", padx=4)
-    _danger_btn(action_btns, text="Remove Selected", command=_remove_action,
-                width=130).pack(side="right", padx=4)
-
-    # -- Key Binds --
-    _section_header(integ_scroll, "Key Binds",
-                    "Say a phrase to press a key (e.g. 'reload' \u2192 r).")
-    ctk.CTkLabel(
-        integ_scroll,
-        text="\u26a0 Do not use in games protected by EAC or BattlEye "
-             "\u2014 synthetic input may be flagged.",
-        text_color=COLOR_WARN,
-        font=FONT_HELP,
-        wraplength=520,
-    ).pack(anchor="w", padx=PAD_OUTER, pady=(0, 4))
-
-    import tkinter as _tk_kb
-    keybinds_frame = ctk.CTkFrame(integ_scroll, corner_radius=8)
-    keybinds_frame.pack(fill="x", padx=PAD_OUTER, pady=(2, 2))
-    keybinds_textbox = _tk_kb.Listbox(
-        keybinds_frame,
-        height=6,
-        selectmode="single",
-        activestyle="none",
-        exportselection=False,
-        bg="#262626",
-        fg="white",
-        selectbackground="#2563eb",
-        selectforeground="white",
-        relief="flat",
-        borderwidth=0,
-        highlightthickness=1,
-        highlightbackground="#404040",
-        highlightcolor="#2563eb",
-        font=("Segoe UI Semibold", 11),
-    )
-    keybinds_textbox.pack(fill="x", padx=8, pady=8)
-
-    kb_input_card = _card(integ_scroll)
-    kb_input_card.pack_configure(pady=(2, 4))
-
-    kb_r1 = _card_row(kb_input_card)
-    ctk.CTkLabel(kb_r1, text="Phrase", width=100).pack(side="left")
-    ctk.CTkEntry(kb_r1, textvariable=keybind_phrase_var, width=240,
-                 placeholder_text="e.g. reload").pack(
-        side="left", padx=(0, 10))
-
-    kb_r2 = _card_row(kb_input_card)
-    ctk.CTkLabel(kb_r2, text="Key", width=100).pack(side="left")
-    ctk.CTkEntry(kb_r2, textvariable=keybind_key_var, width=180,
-                 placeholder_text="e.g. alt+n or x1 > q").pack(side="left", padx=(0, 10))
-    _secondary_btn(
-        kb_r2, text="+ Step",
-        command=lambda: _record_keybind_key(keybind_key_var),
-        width=90
-    ).pack(side="left")
-
-    kb_r3 = _card_row(kb_input_card)
-    ctk.CTkLabel(kb_r3, text="Count", width=100).pack(side="left")
-    ctk.CTkEntry(kb_r3, textvariable=keybind_count_var, width=60,
-                 placeholder_text="1").pack(side="left", padx=(0, 10))
-    ctk.CTkLabel(kb_r3, text="(how many times to press)",
-                 text_color=COLOR_HELP).pack(side="left")
-
-    kb_btns = _btn_row(integ_scroll)
-    kb_btns.pack_configure(pady=(4, PAD_SECTION))
-    _primary_btn(kb_btns, text="Add Key Bind", command=_add_keybind,
-                 width=130).pack(side="left", padx=4)
-    _danger_btn(kb_btns, text="Remove Selected", command=_remove_keybind,
-                width=130).pack(side="right", padx=4)
+    kb_step_btn = _secondary_btn("+ Step", _do_record_keybind)
+    kb_cvl.addWidget(_hrow(kb_key_lbl, kb_key_edit, kb_step_btn))
+    kb_cnt_lbl = QLabel("Count")
+    kb_cnt_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 100px;")
+    kb_cnt_edit = _make_entry(60, "1")
+    kb_cnt_edit.setText(keybind_count_var.get())
+    kb_cnt_edit.textChanged.connect(keybind_count_var.set)
+    kb_cnt_hint = QLabel("(how many times to press)")
+    kb_cnt_hint.setStyleSheet(f"color: {_MUTED};")
+    kb_cvl.addWidget(_hrow(kb_cnt_lbl, kb_cnt_edit, kb_cnt_hint))
+    integ_vl.addWidget(kb_card)
+    integ_vl.addWidget(_hrow(
+        _primary_btn("Add Key Bind", _add_keybind),
+        _danger_btn("Remove Selected", _remove_keybind),
+    ))
+    integ_vl.addStretch()
 
     # =====================================================================
     # DISCORD TAB
     # =====================================================================
-    discord_scroll = _make_scrollable(tabview.tab("Discord"))
+    discord_area, _, discord_vl = _scrollable_tab()
+    tabs.addTab(discord_area, "Discord")
 
-    # -- Bot Credentials --
-    _section_header(
-        discord_scroll,
-        "Bot Credentials",
-        "Required for `read discord`.\nGet your bot token from discord.dev.",
+    for w in _section_label("Bot Credentials", "Required for `read discord`.\nGet your bot token from discord.dev."):
+        discord_vl.addWidget(w)
+    creds_card = _card_frame()
+    creds_cvl = QVBoxLayout(creds_card)
+    creds_cvl.setContentsMargins(12, 8, 12, 8)
+    token_lbl = QLabel("Bot Token")
+    token_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 120px;")
+    token_edit = _make_entry(320, "Bot token from Discord Developer Portal", password=True)
+    token_edit.setText(discord_bot_token_var.get())
+    token_edit.textChanged.connect(discord_bot_token_var.set)
+    creds_cvl.addWidget(_hrow(token_lbl, token_edit))
+    srv_id_lbl = QLabel("Default Server ID")
+    srv_id_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 120px;")
+    srv_id_edit = _make_entry(220, "Right-click server → Copy Server ID")
+    srv_id_edit.setText(discord_server_id_var.get())
+    srv_id_edit.textChanged.connect(discord_server_id_var.set)
+    creds_cvl.addWidget(_hrow(srv_id_lbl, srv_id_edit))
+    discord_vl.addWidget(creds_card)
+
+    for w in _section_label("Servers", "Add servers with a nickname.\nExample: `discord <nickname> <channel> <message>`"):
+        discord_vl.addWidget(w)
+    discord_servers_textbox = _make_listbox(4)
+    discord_vl.addWidget(discord_servers_textbox)
+    srv_card = _card_frame()
+    srv_cvl = QVBoxLayout(srv_card)
+    srv_cvl.setContentsMargins(12, 8, 12, 8)
+    srv_nick_lbl = QLabel("Nickname")
+    srv_nick_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 120px;")
+    srv_nick_edit = _make_entry(160, "e.g. baddie")
+    srv_nick_edit.textChanged.connect(discord_srv_nickname_var.set)
+    srv_cvl.addWidget(_hrow(srv_nick_lbl, srv_nick_edit))
+    srv_sid_lbl = QLabel("Server ID")
+    srv_sid_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 120px;")
+    srv_sid_edit = _make_entry(220, "Right-click server → Copy Server ID")
+    srv_sid_edit.textChanged.connect(discord_srv_id_var.set)
+    srv_cvl.addWidget(_hrow(srv_sid_lbl, srv_sid_edit))
+    discord_vl.addWidget(srv_card)
+    discord_vl.addWidget(_hrow(
+        _primary_btn("Add Server", _add_discord_server),
+        _danger_btn("Remove Selected", _remove_discord_server),
+    ))
+
+    for w in _section_label("Channels", "Webhook channels.\nOptionally tag a server so `discord <server> <channel>` works."):
+        discord_vl.addWidget(w)
+    discord_channels_textbox = _make_listbox(5)
+    discord_vl.addWidget(discord_channels_textbox)
+    ch_card = _card_frame()
+    ch_cvl = QVBoxLayout(ch_card)
+    ch_cvl.setContentsMargins(12, 8, 12, 8)
+    ch_name_lbl = QLabel("Channel name")
+    ch_name_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 120px;")
+    ch_name_edit = _make_entry(180, "e.g. general")
+    ch_name_edit.textChanged.connect(discord_ch_name_var.set)
+    ch_cvl.addWidget(_hrow(ch_name_lbl, ch_name_edit))
+    ch_srv_lbl = QLabel("Server nickname")
+    ch_srv_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 120px;")
+    ch_srv_edit = _make_entry(180, "optional — e.g. baddie")
+    ch_srv_edit.textChanged.connect(discord_ch_server_var.set)
+    ch_cvl.addWidget(_hrow(ch_srv_lbl, ch_srv_edit))
+    ch_url_lbl = QLabel("Webhook URL")
+    ch_url_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 120px;")
+    ch_url_edit = _make_entry(320, "https://discord.com/api/webhooks/...")
+    ch_url_edit.textChanged.connect(discord_ch_url_var.set)
+    ch_cvl.addWidget(_hrow(ch_url_lbl, ch_url_edit))
+    discord_vl.addWidget(ch_card)
+    discord_vl.addWidget(_hrow(
+        _primary_btn("Add Channel", _add_discord_channel),
+        _danger_btn("Remove Selected", _remove_discord_channel),
+    ))
+    cmd_hint = QLabel(
+        "Commands\n"
+        "discord <channel> <message>\n"
+        "discord <server> <channel> <message>\n"
+        "read discord <server> <channel>"
     )
-    creds_card = _card(discord_scroll)
-
-    creds_r1 = _card_row(creds_card)
-    ctk.CTkLabel(creds_r1, text="Bot Token", width=120).pack(side="left")
-    ctk.CTkEntry(creds_r1, textvariable=discord_bot_token_var, width=320,
-                 show="*",
-                 placeholder_text="Bot token from Discord Developer Portal"
-                 ).pack(side="left", padx=(0, 10))
-
-    creds_r2 = _card_row(creds_card)
-    ctk.CTkLabel(creds_r2, text="Default Server ID", width=120).pack(side="left")
-    ctk.CTkEntry(creds_r2, textvariable=discord_server_id_var, width=220,
-                 placeholder_text="Right-click server \u2192 Copy Server ID"
-                 ).pack(side="left", padx=(0, 10))
-
-    # -- Servers --
-    _section_header(
-        discord_scroll,
-        "Servers",
-        "Add servers with a nickname.\nExample: `discord <nickname> <channel> <message>`",
-    )
-
-    import tkinter as _tk_disc
-    discord_servers_frame = ctk.CTkFrame(discord_scroll, corner_radius=8)
-    discord_servers_frame.pack(fill="x", padx=PAD_OUTER, pady=(2, 2))
-    discord_servers_textbox = _tk_disc.Listbox(
-        discord_servers_frame,
-        height=4,
-        selectmode="single",
-        activestyle="none",
-        exportselection=False,
-        bg="#262626",
-        fg="white",
-        selectbackground="#2563eb",
-        selectforeground="white",
-        relief="flat",
-        borderwidth=0,
-        highlightthickness=1,
-        highlightbackground="#404040",
-        highlightcolor="#2563eb",
-        font=("Segoe UI Semibold", 11),
-    )
-    discord_servers_textbox.pack(fill="x", padx=8, pady=8)
-
-    srv_input_card = _card(discord_scroll)
-    srv_input_card.pack_configure(pady=(2, 4))
-    srv_r1 = _card_row(srv_input_card)
-    ctk.CTkLabel(srv_r1, text="Nickname", width=120).pack(side="left")
-    ctk.CTkEntry(srv_r1, textvariable=discord_srv_nickname_var, width=160,
-                 placeholder_text="e.g. baddie").pack(side="left", padx=(0, 10))
-
-    srv_r2 = _card_row(srv_input_card)
-    ctk.CTkLabel(srv_r2, text="Server ID", width=120).pack(side="left")
-    ctk.CTkEntry(srv_r2, textvariable=discord_srv_id_var, width=220,
-                 placeholder_text="Right-click server \u2192 Copy Server ID"
-                 ).pack(side="left", padx=(0, 10))
-
-    srv_btns = _btn_row(discord_scroll)
-    srv_btns.pack_configure(pady=(4, PAD_SECTION))
-    _primary_btn(srv_btns, text="Add Server", command=_add_discord_server, width=120).pack(side="left", padx=4)
-    _danger_btn(srv_btns, text="Remove Selected", command=_remove_discord_server, width=140).pack(side="left", padx=4)
-
-    # -- Channels --
-    _section_header(
-        discord_scroll,
-        "Channels",
-        "Webhook channels.\nOptionally tag a server so `discord <server> <channel>` works.",
-    )
-
-    discord_channels_frame = ctk.CTkFrame(discord_scroll, corner_radius=8)
-    discord_channels_frame.pack(fill="x", padx=PAD_OUTER, pady=(2, 2))
-    discord_channels_textbox = _tk_disc.Listbox(
-        discord_channels_frame,
-        height=5,
-        selectmode="single",
-        activestyle="none",
-        exportselection=False,
-        bg="#262626",
-        fg="white",
-        selectbackground="#2563eb",
-        selectforeground="white",
-        relief="flat",
-        borderwidth=0,
-        highlightthickness=1,
-        highlightbackground="#404040",
-        highlightcolor="#2563eb",
-        font=("Segoe UI Semibold", 11),
-    )
-    discord_channels_textbox.pack(fill="x", padx=8, pady=8)
-
-    ch_input_card = _card(discord_scroll)
-    ch_input_card.pack_configure(pady=(2, 4))
-    ch_r1 = _card_row(ch_input_card)
-    ctk.CTkLabel(ch_r1, text="Channel name", width=120).pack(side="left")
-    ctk.CTkEntry(ch_r1, textvariable=discord_ch_name_var, width=180,
-                 placeholder_text="e.g. general").pack(side="left", padx=(0, 10))
-
-    ch_r2 = _card_row(ch_input_card)
-    ctk.CTkLabel(ch_r2, text="Server nickname", width=120).pack(side="left")
-    ctk.CTkEntry(ch_r2, textvariable=discord_ch_server_var, width=180,
-                 placeholder_text="optional — e.g. baddie").pack(side="left", padx=(0, 10))
-
-    ch_r3 = _card_row(ch_input_card)
-    ctk.CTkLabel(ch_r3, text="Webhook URL", width=120).pack(side="left")
-    ctk.CTkEntry(ch_r3, textvariable=discord_ch_url_var, width=320,
-                 placeholder_text="https://discord.com/api/webhooks/..."
-                 ).pack(side="left", padx=(0, 10))
-
-    ch_btns = _btn_row(discord_scroll)
-    ch_btns.pack_configure(pady=(4, PAD_SECTION))
-    _primary_btn(ch_btns, text="Add Channel", command=_add_discord_channel, width=120).pack(side="left", padx=4)
-    _danger_btn(ch_btns, text="Remove Selected", command=_remove_discord_channel, width=140).pack(side="left", padx=4)
-
-    ctk.CTkLabel(
-        discord_scroll,
-        text=(
-            "Commands\n"
-            "discord <channel> <message>\n"
-            "discord <server> <channel> <message>\n"
-            "read discord <server> <channel>"
-        ),
-        font=FONT_HELP,
-        text_color=COLOR_HELP,
-        justify="left",
-        wraplength=560,
-    ).pack(anchor="w", padx=PAD_OUTER, pady=(8, 0))
+    cmd_hint.setStyleSheet(f"color: {_MUTED}; font-size: 11px;")
+    discord_vl.addWidget(cmd_hint)
+    discord_vl.addStretch()
 
     # =====================================================================
     # TRAINING TAB
     # =====================================================================
+    training_area, _, training_vl = _scrollable_tab()
+    tabs.addTab(training_area, "Training")
+
     from skills import load_unmatched, save_user_mishear, dismiss_unmatched, load_groq_handled, dismiss_groq_handled
 
-    training_scroll = _make_scrollable(tabview.tab("Training"))
+    for w in _section_label("Mishear Training", "Transcripts VERA didn't understand. Select one, type what you meant, and save."):
+        training_vl.addWidget(w)
 
-    _section_header(training_scroll, "Mishear Training",
-                    "Transcripts VERA didn't understand. Select one, type what you meant, and save.")
+    unmatched_listbox = _make_listbox(8)
+    training_vl.addWidget(unmatched_listbox)
 
-    # List frame
-    unmatched_list_frame = ctk.CTkFrame(training_scroll, corner_radius=8)
-    unmatched_list_frame.pack(fill="x", padx=PAD_OUTER, pady=(2, 4))
-
-    unmatched_listbox_var = tk.StringVar(value=[])
-    unmatched_listbox = tk.Listbox(
-        unmatched_list_frame,
-        listvariable=unmatched_listbox_var,
-        height=8,
-        selectmode="single",
-        font=("Segoe UI Semibold", 11),
-        activestyle="none",
-        exportselection=False,
-        bg="#262626",
-        fg="white",
-        selectbackground="#2563eb",
-        selectforeground="white",
-        relief="flat",
-        borderwidth=0,
-        highlightthickness=1,
-        highlightbackground="#404040",
-        highlightcolor="#2563eb",
-    )
-    unmatched_listbox.pack(fill="both", expand=True, padx=8, pady=8)
-
-    _selected_mishear = [None]  # mutable container so closures can write to it
+    _selected_mishear = [None]
 
     def _refresh_unmatched():
-        entries = load_unmatched()
-        unmatched_listbox_var.set(entries)
+        unmatched_listbox.clear()
+        for e in load_unmatched():
+            unmatched_listbox.addItem(e)
 
     _refresh_unmatched()
 
-    def _on_unmatched_select(event=None):
-        sel = unmatched_listbox.curselection()
+    correction_frame = QWidget()
+    correction_frame.setStyleSheet("background: transparent;")
+    correction_layout = QHBoxLayout(correction_frame)
+    correction_layout.setContentsMargins(0, 0, 0, 0)
+    correct_lbl = QLabel("Correct to:")
+    correct_lbl.setStyleSheet(f"color: {_TEXT};")
+    correction_entry = _make_entry(260, "what you actually said")
+    correction_layout.addWidget(correct_lbl)
+    correction_layout.addWidget(correction_entry)
+    correction_layout.addStretch()
+    training_vl.addWidget(correction_frame)
+
+    def _on_unmatched_select():
+        sel = unmatched_listbox.selectedItems()
         if sel:
-            text = unmatched_listbox.get(sel[0])
+            text = sel[0].text()
             _selected_mishear[0] = text
-            correction_entry.delete(0, "end")
-            correction_entry.insert(0, text)
+            correction_entry.setText(text)
 
-    unmatched_listbox.bind("<<ListboxSelect>>", _on_unmatched_select)
-
-    # Correction row
-    correction_frame = ctk.CTkFrame(training_scroll, fg_color="transparent")
-    correction_frame.pack(fill="x", padx=PAD_OUTER, pady=(0, 2))
-
-    ctk.CTkLabel(correction_frame, text="Correct to:", font=FONT_BODY).pack(side="left", padx=(0, 8))
-    correction_entry = ctk.CTkEntry(correction_frame, placeholder_text="what you actually said", width=260)
-    correction_entry.pack(side="left", fill="x", expand=True)
+    unmatched_listbox.itemSelectionChanged.connect(_on_unmatched_select)
 
     def _save_correction():
         mishear = _selected_mishear[0]
         if not mishear:
             return
-        correction = correction_entry.get().strip()
+        correction = correction_entry.text().strip()
         if not correction:
             return
         save_user_mishear(mishear, correction)
         dismiss_unmatched(mishear)
         _selected_mishear[0] = None
-        correction_entry.delete(0, "end")
+        correction_entry.clear()
         _refresh_unmatched()
 
     def _dismiss_selected():
@@ -1019,62 +1028,38 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
             return
         dismiss_unmatched(mishear)
         _selected_mishear[0] = None
-        correction_entry.delete(0, "end")
+        correction_entry.clear()
         _refresh_unmatched()
 
-    btn_row = _btn_row(training_scroll)
-    _primary_btn(btn_row, text="Save Correction", command=_save_correction, width=140).pack(side="left", padx=4)
-    _secondary_btn(btn_row, text="Dismiss", command=_dismiss_selected, width=100).pack(side="left", padx=4)
-    _muted_btn(btn_row, text="Refresh", command=_refresh_unmatched, width=90).pack(side="left", padx=4)
+    training_vl.addWidget(_hrow(
+        _primary_btn("Save Correction", _save_correction),
+        _secondary_btn("Dismiss", _dismiss_selected),
+        _muted_btn("Refresh", _refresh_unmatched),
+    ))
+    saved_hint = QLabel("Saved corrections take effect immediately — no restart needed.")
+    saved_hint.setStyleSheet(f"color: {_MUTED}; font-size: 11px;")
+    training_vl.addWidget(saved_hint)
 
-    ctk.CTkLabel(training_scroll,
-                 text="Saved corrections take effect immediately — no restart needed.",
-                 font=FONT_HELP, text_color=COLOR_HELP).pack(anchor="w", padx=PAD_OUTER, pady=(4, 0))
-
-    # -- Groq Handled --
-    _section_header(training_scroll, "Groq Handled",
-                    "Things VERA answered via AI that could become real skills. "
-                    "Use these to spot patterns worth adding as commands.")
-
-    groq_list_frame = ctk.CTkFrame(training_scroll, corner_radius=8)
-    groq_list_frame.pack(fill="x", padx=PAD_OUTER, pady=(2, 4))
-
-    groq_listbox = tk.Listbox(
-        groq_list_frame,
-        height=8,
-        selectmode="single",
-        activestyle="none",
-        exportselection=False,
-        bg="#262626",
-        fg="white",
-        selectbackground="#2563eb",
-        selectforeground="white",
-        relief="flat",
-        borderwidth=0,
-        highlightthickness=1,
-        highlightbackground="#404040",
-        highlightcolor="#2563eb",
-        font=("Segoe UI Semibold", 11),
-    )
-    groq_listbox.pack(fill="x", padx=8, pady=8)
-    groq_listbox.bind("<MouseWheel>", lambda e: (groq_listbox.yview_scroll(-1 * (e.delta // 120), "units"), "break")[1])
+    for w in _section_label("Groq Handled", "Things VERA answered via AI that could become real skills."):
+        training_vl.addWidget(w)
+    groq_listbox = _make_listbox(8)
+    training_vl.addWidget(groq_listbox)
 
     _selected_groq = [None]
 
     def _refresh_groq_handled():
-        entries = load_groq_handled()
-        groq_listbox.delete(0, "end")
-        for e in entries:
-            groq_listbox.insert("end", e)
+        groq_listbox.clear()
+        for e in load_groq_handled():
+            groq_listbox.addItem(e)
 
     _refresh_groq_handled()
 
-    def _on_groq_select(event=None):
-        sel = groq_listbox.curselection()
+    def _on_groq_select():
+        sel = groq_listbox.selectedItems()
         if sel:
-            _selected_groq[0] = groq_listbox.get(sel[0])
+            _selected_groq[0] = sel[0].text()
 
-    groq_listbox.bind("<<ListboxSelect>>", _on_groq_select)
+    groq_listbox.itemSelectionChanged.connect(_on_groq_select)
 
     def _dismiss_groq():
         entry = _selected_groq[0]
@@ -1095,177 +1080,213 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
         _selected_groq[0] = None
         _refresh_groq_handled()
 
-    groq_btn_row = _btn_row(training_scroll)
-    _secondary_btn(groq_btn_row, text="Dismiss Selected", command=_dismiss_groq, width=140).pack(side="left", padx=4)
-    _danger_btn(groq_btn_row, text="Clear All", command=_clear_all_groq, width=100).pack(side="left", padx=4)
-    _muted_btn(groq_btn_row, text="Refresh", command=_refresh_groq_handled, width=90).pack(side="left", padx=4)
+    training_vl.addWidget(_hrow(
+        _secondary_btn("Dismiss Selected", _dismiss_groq),
+        _danger_btn("Clear All", _clear_all_groq),
+        _muted_btn("Refresh", _refresh_groq_handled),
+    ))
+    training_vl.addStretch()
 
     # =====================================================================
-    # STATUS BAR  (persistent, outside tabview)
+    # STATUS BAR (bottom of window, outside tabs)
     # =====================================================================
-    status_frame = ctk.CTkFrame(root)
-    status_frame.pack(fill="x", padx=10, pady=(4, 10))
-    status_frame.grid_columnconfigure(0, weight=1)
-    status_frame.grid_columnconfigure(1, weight=0)
-    status_left = ctk.CTkFrame(status_frame, fg_color="transparent")
-    status_left.grid(row=0, column=0, sticky="ew", padx=12, pady=8)
-    ctk.CTkLabel(status_left, text="Status:",
-                 font=("Segoe UI", 11, "bold")).pack(side="left")
+    status_frame = QWidget()
+    status_frame.setStyleSheet(f"background-color: {_SURFACE}; border-top: 1px solid #3a3a3a;")
+    status_frame.setFixedHeight(56)
+    status_layout = QHBoxLayout(status_frame)
+    status_layout.setContentsMargins(12, 0, 12, 0)
 
-    # Indicator dot — color reflects current state
-    _indicator = ctk.CTkLabel(status_left, text="●", font=("Segoe UI", 14), text_color="gray")
-    _indicator.pack(side="left", padx=(8, 4))
+    status_kw = QLabel("Status:")
+    status_kw.setStyleSheet("font-weight: bold; font-size: 11px; color: #ffffff;")
+    _indicator = QLabel("●")
+    _indicator.setStyleSheet("font-size: 14px; color: gray;")
+    status_label = QLabel("Idle")
+    status_label.setStyleSheet(f"color: {_TEXT};")
 
-    def _update_indicator(status: str):
-        s = status.lower()
+    last_kw = QLabel("Last:")
+    last_kw.setStyleSheet("font-weight: bold; font-size: 11px; color: #ffffff;")
+    transcript_entry = _make_entry(260)
+    transcript_entry.setReadOnly(True)
+
+    status_layout.addWidget(status_kw)
+    status_layout.addWidget(_indicator)
+    status_layout.addWidget(status_label)
+    status_layout.addSpacing(20)
+    status_layout.addWidget(last_kw)
+    status_layout.addWidget(transcript_entry)
+    status_layout.addStretch()
+
+    # Save button (hidden until dirty)
+    save_button = QPushButton("Unsaved changes")
+    save_button.setStyleSheet("""
+        QPushButton {
+            background-color: #d97706; color: white;
+            border-radius: 999px; padding: 5px 16px;
+            font-size: 11px; font-weight: bold;
+        }
+        QPushButton:hover { background-color: #b45309; }
+    """)
+    save_button.clicked.connect(_save)
+    save_button.setVisible(False)
+    status_layout.addWidget(save_button)
+
+    outer_vl.addWidget(status_frame)
+
+    # Wire status_var to label
+    def _update_status_label(text: str):
+        status_label.setText(text)
+        status_var.set(text)
+        s = text.lower()
         if "recording" in s:
-            _indicator.configure(text_color="#e74c3c")   # red — mic is hot
+            _indicator.setStyleSheet("font-size: 14px; color: #e74c3c;")
         elif "listening" in s or "wake" in s:
-            _indicator.configure(text_color="#2ecc71")   # green — active
+            _indicator.setStyleSheet("font-size: 14px; color: #2ecc71;")
         elif "processing" in s or "installing" in s or "downloading" in s:
-            _indicator.configure(text_color="#3498db")   # blue — busy
+            _indicator.setStyleSheet("font-size: 14px; color: #3498db;")
         else:
-            _indicator.configure(text_color="gray")      # idle
+            _indicator.setStyleSheet("font-size: 14px; color: gray;")
 
-    status_var.trace_add("write", lambda *_: _update_indicator(status_var.get()))
+    status_var._ui_update = _update_status_label
+    status_var.trace_add("write", lambda *_: _update_status_label(status_var.get()))
 
-    ctk.CTkLabel(status_left, textvariable=status_var).pack(
-        side="left", padx=(4, 20))
-    ctk.CTkLabel(status_left, text="Last:",
-                 font=("Segoe UI", 11, "bold")).pack(side="left")
-    ctk.CTkEntry(status_left, textvariable=transcript_var,
-                 width=260).pack(side="left", padx=(8, 0))
-    save_button = ctk.CTkButton(
-        status_frame,
-        text="Unsaved changes",
-        command=_save,
-        width=150,
-        height=32,
-        corner_radius=999,
-        fg_color=("#d97706", "#d97706"),
-        hover_color=("#b45309", "#b45309"),
-        font=("Segoe UI", 11, "bold"),
-    )
-    notice_frame = ctk.CTkFrame(status_frame, corner_radius=8, fg_color=("#fdecea", "#4a1f1f"))
-    notice_content = ctk.CTkFrame(notice_frame, fg_color="transparent")
-    notice_content.pack(fill="x", padx=10, pady=8)
-    notice_label = ctk.CTkLabel(
-        notice_content,
-        text="",
-        anchor="w",
-        justify="left",
-        text_color=("#8a1c1c", "#ffb4b4"),
-        wraplength=500,
-        font=("Segoe UI", 11),
-    )
-    notice_label.pack(side="left", fill="x", expand=True)
-    notice_action_button = ctk.CTkButton(notice_content, text="Action", width=120, height=28)
-    notice_close_button = ctk.CTkButton(notice_content, text="Close", width=84, height=28)
-    update_frame = ctk.CTkFrame(status_frame, corner_radius=8, fg_color=("#fff4db", "#4a3a1f"))
-    update_content = ctk.CTkFrame(update_frame, fg_color="transparent")
-    update_content.pack(fill="x", padx=10, pady=8)
-    update_label = ctk.CTkLabel(
-        update_content,
-        text="",
-        anchor="w",
-        justify="left",
-        text_color=("#8a6116", "#ffd67d"),
-        wraplength=500,
-        font=("Segoe UI", 11),
-    )
-    update_label.pack(side="left", fill="x", expand=True)
-    update_action_button = ctk.CTkButton(update_content, text="Check Updates", width=120, height=28)
-    update_close_button = ctk.CTkButton(update_content, text="Close", width=84, height=28)
+    def _update_transcript_label(text: str):
+        transcript_var.set(text)
+        transcript_entry.setText(text)
 
-    loading_overlay = ctk.CTkFrame(root, corner_radius=0, fg_color=("gray96", "gray12"))
-    loading_card = ctk.CTkFrame(loading_overlay, corner_radius=18, fg_color=("gray92", "gray18"))
-    loading_card.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.72, relheight=0.48)
-    loading_logo = _load_logo()
-    if loading_logo is not None:
-        loading_logo_label = ctk.CTkLabel(loading_card, image=loading_logo, text="")
-        loading_logo_label.pack(pady=(22, 4))
-    else:
-        loading_logo_label = None
-    ctk.CTkLabel(
-        loading_card,
-        text="VERA",
-        font=("Segoe UI", 24, "bold"),
-    ).pack(pady=(0, 6))
-    ctk.CTkLabel(
-        loading_card,
-        text="Loading your workspace...",
-        font=("Segoe UI", 12),
-        text_color=COLOR_HELP,
-    ).pack()
-    loading_progress = ctk.CTkProgressBar(loading_card, mode="indeterminate", width=240)
-    loading_progress.pack(pady=(18, 10))
-    loading_progress.start()
-    loading_overlay.place_forget()
+    transcript_var._ui_update = _update_transcript_label
+    transcript_var.trace_add("write", lambda *_: transcript_entry.setText(transcript_var.get()))
 
-    record_backdrop = ctk.CTkFrame(
-        root,
-        corner_radius=0,
-        fg_color=("#f3f4f6", "#111827"),
-    )
-    record_overlay = ctk.CTkFrame(
-        record_backdrop,
-        corner_radius=14,
-        border_width=1,
-        border_color=("gray70", "gray30"),
-        fg_color=("gray95", "gray18"),
-    )
-    record_overlay.grid_columnconfigure(0, weight=1)
-    record_title_label = ctk.CTkLabel(
-        record_overlay,
-        text="",
-        anchor="w",
-        justify="left",
-        font=("Segoe UI", 16, "bold"),
-    )
-    record_title_label.grid(row=0, column=0, sticky="ew", padx=18, pady=(16, 6))
-    record_message_label = ctk.CTkLabel(
-        record_overlay,
-        text="",
-        anchor="w",
-        justify="left",
-        wraplength=340,
-        font=("Segoe UI", 12),
-    )
-    record_message_label.grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 10))
-    record_status_label = ctk.CTkLabel(
-        record_overlay,
-        text="Listening for your input...",
-        anchor="w",
-        justify="left",
-        text_color=("gray40", "gray75"),
-        font=("Segoe UI", 11),
-    )
-    record_status_label.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 6))
-    record_hint_label = ctk.CTkLabel(
-        record_overlay,
-        text="Press Esc to cancel.",
-        anchor="w",
-        justify="left",
-        text_color=("gray50", "gray65"),
-        font=("Segoe UI", 11),
-    )
-    record_hint_label.grid(row=3, column=0, sticky="ew", padx=18, pady=(0, 16))
-    record_overlay.pack(expand=True)
-    record_backdrop.place_forget()
-    record_overlay.place_forget()
+    # Notice frame (inline error/info bar, hidden by default)
+    notice_frame = QWidget()
+    notice_frame.setStyleSheet("background-color: #4a1f1f; border-radius: 8px;")
+    notice_frame.setVisible(False)
+    notice_layout = QHBoxLayout(notice_frame)
+    notice_layout.setContentsMargins(10, 6, 10, 6)
+    notice_label = QLabel("")
+    notice_label.setStyleSheet("color: #ffb4b4; font-size: 11px;")
+    notice_label.setWordWrap(True)
+    notice_layout.addWidget(notice_label, stretch=1)
+    notice_action_button = QPushButton("Action")
+    notice_action_button.setStyleSheet(_BTN_SECONDARY)
+    notice_action_button.setVisible(False)
+    notice_layout.addWidget(notice_action_button)
+    notice_close_button = QPushButton("Close")
+    notice_close_button.setStyleSheet(_BTN_MUTED)
+    notice_close_button.setVisible(False)
+    notice_layout.addWidget(notice_close_button)
+    outer_vl.addWidget(notice_frame)
 
-    install_smooth_scrolling(
-        root,
-        home_scroll,
-        settings_scroll,
-        apps_scroll,
-        integ_scroll,
-        discord_scroll,
-        training_scroll,
-    )
+    # Update frame (for update available notification)
+    update_frame = QWidget()
+    update_frame.setStyleSheet("background-color: #4a3a1f; border-radius: 8px;")
+    update_frame.setVisible(False)
+    update_layout = QHBoxLayout(update_frame)
+    update_layout.setContentsMargins(10, 6, 10, 6)
+    update_label = QLabel("")
+    update_label.setStyleSheet("color: #ffd67d; font-size: 11px;")
+    update_label.setWordWrap(True)
+    update_layout.addWidget(update_label, stretch=1)
+    update_action_button = QPushButton("Check Updates")
+    update_action_button.setStyleSheet(_BTN_SECONDARY)
+    update_action_button.setVisible(False)
+    update_layout.addWidget(update_action_button)
+    update_close_button = QPushButton("Close")
+    update_close_button.setStyleSheet(_BTN_MUTED)
+    update_close_button.setVisible(False)
+    update_layout.addWidget(update_close_button)
+    outer_vl.addWidget(update_frame)
 
     # =====================================================================
-    # RETURN DICT  (identical keys to original)
+    # LOADING OVERLAY
+    # =====================================================================
+    loading_overlay = _OverlayWidget(central)
+    loading_overlay.setStyleSheet(f"background-color: #1e1e1e;")
+    loading_inner = QWidget(loading_overlay)
+    loading_inner.setStyleSheet("background-color: #2b2b2b; border-radius: 18px;")
+    loading_inner.setFixedSize(380, 220)
+    load_vl = QVBoxLayout(loading_inner)
+    load_vl.setAlignment(Qt.AlignCenter)
+
+    load_logo_path = _load_logo()
+    if load_logo_path:
+        ll_px = QPixmap(load_logo_path)
+        if not ll_px.isNull():
+            ll_lbl = QLabel()
+            ll_lbl.setPixmap(ll_px.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            ll_lbl.setAlignment(Qt.AlignCenter)
+            load_vl.addWidget(ll_lbl)
+
+    load_title = QLabel("VERA")
+    load_title.setAlignment(Qt.AlignCenter)
+    load_title.setStyleSheet("font-size: 24px; font-weight: bold; color: #ffffff;")
+    load_vl.addWidget(load_title)
+
+    load_sub = QLabel("Loading your workspace...")
+    load_sub.setAlignment(Qt.AlignCenter)
+    load_sub.setStyleSheet("color: #888888; font-size: 12px;")
+    load_vl.addWidget(load_sub)
+
+    loading_progress = QProgressBar()
+    loading_progress.setRange(0, 0)  # indeterminate
+    loading_progress.setFixedWidth(240)
+    loading_progress.setFixedHeight(6)
+    loading_progress.setTextVisible(False)
+    loading_progress.setStyleSheet(f"""
+        QProgressBar {{ background: #444; border-radius: 3px; }}
+        QProgressBar::chunk {{ background: {_ACCENT}; border-radius: 3px; }}
+    """)
+    load_vl.addWidget(loading_progress, alignment=Qt.AlignCenter)
+
+    def _position_loading_inner():
+        x = (loading_overlay.width() - loading_inner.width()) // 2
+        y = (loading_overlay.height() - loading_inner.height()) // 2
+        loading_inner.move(max(0, x), max(0, y))
+
+    loading_overlay.resizeEvent = lambda e: _position_loading_inner()
+    loading_overlay.show_over()
+
+    # =====================================================================
+    # RECORD OVERLAY
+    # =====================================================================
+    record_backdrop = _OverlayWidget(central)
+    record_backdrop.setStyleSheet("background-color: rgba(17, 24, 39, 180);")
+
+    record_overlay = QWidget(record_backdrop)
+    record_overlay.setStyleSheet("background-color: #2a2a2a; border-radius: 14px; border: 1px solid #444444;")
+    record_overlay.setFixedWidth(400)
+
+    rec_inner_vl = QVBoxLayout(record_overlay)
+    rec_inner_vl.setContentsMargins(18, 16, 18, 16)
+    rec_inner_vl.setSpacing(8)
+
+    record_title_label = QLabel("")
+    record_title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
+    rec_inner_vl.addWidget(record_title_label)
+
+    record_message_label = QLabel("")
+    record_message_label.setStyleSheet("font-size: 12px; color: #cccccc;")
+    record_message_label.setWordWrap(True)
+    rec_inner_vl.addWidget(record_message_label)
+
+    record_status_label = QLabel("Listening for your input...")
+    record_status_label.setStyleSheet(f"color: {_MUTED}; font-size: 11px;")
+    rec_inner_vl.addWidget(record_status_label)
+
+    record_hint_label = QLabel("Press Esc to cancel.")
+    record_hint_label.setStyleSheet("color: #666666; font-size: 11px;")
+    rec_inner_vl.addWidget(record_hint_label)
+    record_overlay.adjustSize()
+
+    def _position_record_overlay():
+        if record_backdrop.width() > 0 and record_backdrop.height() > 0:
+            x = (record_backdrop.width() - record_overlay.width()) // 2
+            y = (record_backdrop.height() - record_overlay.height()) // 2
+            record_overlay.move(max(0, x), max(0, y))
+
+    record_backdrop.resizeEvent = lambda e: _position_record_overlay()
+
+    # =====================================================================
+    # RETURN DICT
     # =====================================================================
     return {
         "apps_textbox": apps_textbox,
@@ -1275,7 +1296,7 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
         "discord_channels_textbox": discord_channels_textbox,
         "discord_servers_textbox": discord_servers_textbox,
         "keybinds_textbox": keybinds_textbox,
-        "tabview": tabview,
+        "tabview": tabs,
         "save_button": save_button,
         "notice_frame": notice_frame,
         "notice_label": notice_label,
@@ -1292,4 +1313,33 @@ def build_ui(root, state: dict, callbacks: dict, constants: dict):
         "record_title_label": record_title_label,
         "record_message_label": record_message_label,
         "record_status_label": record_status_label,
+        "status_label": status_label,
+        "transcript_entry": transcript_entry,
     }
+
+
+def _apply_qt_theme(is_dark: bool):
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtGui import QPalette, QColor
+    app = QApplication.instance()
+    if app is None:
+        return
+    app.setStyle("Fusion")
+    pal = QPalette()
+    pal.setColor(QPalette.ColorRole.Window,          QColor("#1e1e1e"))
+    pal.setColor(QPalette.ColorRole.WindowText,      QColor("#ffffff"))
+    pal.setColor(QPalette.ColorRole.Base,            QColor("#2b2b2b"))
+    pal.setColor(QPalette.ColorRole.AlternateBase,   QColor("#252525"))
+    pal.setColor(QPalette.ColorRole.Text,            QColor("#ffffff"))
+    pal.setColor(QPalette.ColorRole.Button,          QColor("#2b2b2b"))
+    pal.setColor(QPalette.ColorRole.ButtonText,      QColor("#ffffff"))
+    pal.setColor(QPalette.ColorRole.Highlight,       QColor("#2563eb"))
+    pal.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
+    pal.setColor(QPalette.ColorRole.PlaceholderText, QColor("#888888"))
+    app.setPalette(pal)
+    app.setStyleSheet("""
+        QScrollBar:vertical { background: #2b2b2b; width: 8px; border-radius: 4px; }
+        QScrollBar::handle:vertical { background: #555555; border-radius: 4px; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+        QToolTip { background: #2b2b2b; color: #ffffff; border: 1px solid #555; }
+    """)

@@ -14,13 +14,72 @@ import shutil
 import tempfile
 import urllib.request
 import json
-import tkinter as tk
-from tkinter import messagebox
-
-import customtkinter as ctk
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QMessageBox, QInputDialog,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QFrame, QFileDialog,
+)
+from PySide6.QtCore import Qt, QTimer, QObject, Signal
+from PySide6.QtGui import QIcon, QCloseEvent
 
 import ui
 import wizard
+
+
+# ---------------------------------------------------------------------------
+# SimpleVar — drop-in replacement for tk.StringVar / tk.BooleanVar / tk.IntVar
+# ---------------------------------------------------------------------------
+
+class SimpleVar:
+    """Minimal Tk variable replacement with .get(), .set(), .trace_add()."""
+
+    def __init__(self, value=""):
+        self._value = value
+        self._write_callbacks: list = []
+        self._ui_update = None   # optional direct widget updater set by ui.py
+
+    def get(self):
+        return self._value
+
+    def set(self, value):
+        self._value = value
+        for cb in list(self._write_callbacks):
+            try:
+                cb()
+            except Exception:
+                pass
+
+    def trace_add(self, mode: str, callback) -> None:
+        if mode == "write":
+            if callback not in self._write_callbacks:
+                self._write_callbacks.append(callback)
+
+    def trace_remove(self, mode: str, callback) -> None:
+        if mode == "write":
+            try:
+                self._write_callbacks.remove(callback)
+            except ValueError:
+                pass
+
+
+# ---------------------------------------------------------------------------
+# UIBridge — thread-safe dispatcher from background threads to Qt main loop
+# ---------------------------------------------------------------------------
+
+class _UIBridge(QObject):
+    """Carries arbitrary callables from background threads to the main thread."""
+    _invoke = Signal(object)
+
+    def __init__(self):
+        super().__init__()
+        self._invoke.connect(lambda fn: fn())
+
+    def post(self, fn):
+        """Call fn() on the Qt main thread (thread-safe from any thread)."""
+        self._invoke.emit(fn)
+
+
+_bridge = _UIBridge()
 
 from app import MissingDependencyError, transcribe_mic, transcribe_mic_hold
 from config import load_config, save_config, discover_apps
@@ -49,20 +108,22 @@ def _notify_info(title: str, message: str) -> None:
     if callable(UI_NOTIFY_INFO):
         UI_NOTIFY_INFO(title, message)
     else:
-        messagebox.showinfo(title, message)
+        QMessageBox.information(None, title, message)
 
 
 def _notify_error(title: str, message: str) -> None:
     if callable(UI_NOTIFY_ERROR):
         UI_NOTIFY_ERROR(title, message)
     else:
-        messagebox.showerror(title, message)
+        QMessageBox.critical(None, title, message)
 
 
 def _confirm_dialog(title: str, message: str) -> bool:
     if callable(UI_CONFIRM):
         return bool(UI_CONFIRM(title, message))
-    return bool(messagebox.askyesno(title, message))
+    result = QMessageBox.question(None, title, message,
+                                  QMessageBox.Yes | QMessageBox.No)
+    return result == QMessageBox.Yes
 
 
 class BackgroundListener:
@@ -266,7 +327,11 @@ def _format_record_key_name(key_name: str) -> str:
         return "Mouse Back"
     if raw == "x2":
         return "Mouse Forward"
-    return str(key_name).strip()
+    # Strip angle brackets for display — <caps_lock> → caps_lock
+    display = str(key_name).strip()
+    if display.startswith("<") and display.endswith(">"):
+        display = display[1:-1]
+    return display
 
 
 def _run_mic(seconds: int, model_path: str, confirm_fn=None, allow_prompt: bool = True, restart_fn=None):
@@ -330,11 +395,8 @@ def main() -> None:
         import ctypes
         _mutex = ctypes.windll.kernel32.CreateMutexW(None, True, "VERASingleInstanceMutex")
         if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-            import tkinter as _tk
-            import tkinter.messagebox as _mb
-            _r = _tk.Tk(); _r.withdraw()
-            _mb.showwarning("VERA", "VERA is already running.")
-            _r.destroy()
+            _si_app = QApplication.instance() or QApplication(sys.argv)
+            QMessageBox.warning(None, "VERA", "VERA is already running.")
             return
     except Exception:
         pass
@@ -410,65 +472,76 @@ def main() -> None:
     except Exception:
         pass
 
-    # --- CustomTkinter setup ---
-    theme_path = os.path.join(os.path.dirname(__file__), "data", "assets", "ipa_theme.json")
-    if os.path.exists(theme_path):
-        ctk.set_default_color_theme(theme_path)
+    # --- PySide6 setup ---
+    app = QApplication.instance() or QApplication(sys.argv)
+    ui._apply_qt_theme(True)
 
-    is_dark = cfg.get("theme", "dark") == "dark"
-    ctk.set_appearance_mode("dark" if is_dark else "light")
+    _quitting = {"flag": False}
 
-    root = ctk.CTk()
-    root.title("VERA")
-    root.geometry("620x560")
-    root.minsize(580, 460)
-    root.resizable(True, True)
+    class _VERAWindow(QMainWindow):
+        def closeEvent(self, event: QCloseEvent):
+            if _quitting["flag"]:
+                event.accept()
+            else:
+                _on_close()
+                event.ignore()
+
+        def changeEvent(self, event):
+            from PySide6.QtCore import QEvent
+            super().changeEvent(event)
+            if event.type() == QEvent.WindowStateChange and self.isMinimized():
+                if tray_ready["ok"]:
+                    QTimer.singleShot(0, self.hide)
+
+    root = _VERAWindow()
+    root.setWindowTitle("VERA")
+    root.resize(620, 560)
+    root.setMinimumSize(580, 460)
     try:
         icon_path = os.path.join(os.path.dirname(__file__), "data", "assets", "ipa.ico")
         if os.path.exists(icon_path):
-            root.iconbitmap(icon_path)
+            root.setWindowIcon(QIcon(icon_path))
     except Exception:
         pass
 
-    # --- Tk variables (these still use tkinter StringVar/BooleanVar) ---
-    theme_var = tk.BooleanVar(value=is_dark)
+    # --- State variables (SimpleVar replaces tk.StringVar / BooleanVar / IntVar) ---
     _saved_mode = cfg.get("mode", "hold")
     if _saved_mode == "mic":
         _saved_mode = "hold"  # migrate old timed mic users to hold
-    mode = tk.StringVar(value=_saved_mode)
-    language = tk.StringVar(value=cfg.get("language", "English"))
-    seconds = tk.StringVar(value=str(cfg.get("seconds", 5)))
-    hotkey = tk.StringVar(value=_normalize_record_key_name(cfg.get("hotkey", HOTKEY_CHOICES[0])))
-    holdkey = tk.StringVar(value=_normalize_record_key_name(cfg.get("hold_key", HOLD_CHOICES[0])))
-    hotkey_display = tk.StringVar(value=_format_record_key_name(hotkey.get()))
-    holdkey_display = tk.StringVar(value=_format_record_key_name(holdkey.get()))
-    search_engine = tk.StringVar(
+    mode = SimpleVar(value=_saved_mode)
+    language = SimpleVar(value=cfg.get("language", "English"))
+    seconds = SimpleVar(value=str(cfg.get("seconds", 5)))
+    hotkey = SimpleVar(value=_normalize_record_key_name(cfg.get("hotkey", HOTKEY_CHOICES[0])))
+    holdkey = SimpleVar(value=_normalize_record_key_name(cfg.get("hold_key", HOLD_CHOICES[0])))
+    hotkey_display = SimpleVar(value=_format_record_key_name(hotkey.get()))
+    holdkey_display = SimpleVar(value=_format_record_key_name(holdkey.get()))
+    search_engine = SimpleVar(
         value=cfg.get("search_engine", "https://www.google.com/search?q={query}")
     )
-    ptt_beep_volume = tk.IntVar(value=int(cfg.get("ptt_beep_volume", 80)))
+    ptt_beep_volume = SimpleVar(value=int(cfg.get("ptt_beep_volume", 80)))
 
     # TTS output device — get available output device names for dropdown
     import sounddevice as _sd
     _all_devices = _sd.query_devices()
     tts_device_choices = ["Default"] + [d["name"] for d in _all_devices if d["max_output_channels"] > 0]
-    tts_output_device = tk.StringVar(value=cfg.get("tts_output_device", "") or "Default")
+    tts_output_device = SimpleVar(value=cfg.get("tts_output_device", "") or "Default")
     tts_voice_choices = [
         "af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky",
         "am_adam", "am_michael",
         "bf_emma", "bf_isabella",
         "bm_george", "bm_lewis",
     ]
-    tts_voice = tk.StringVar(value=cfg.get("tts_voice", "af_heart"))
-    personality_mode = tk.StringVar(value=cfg.get("personality_mode", "default"))
-    bug_report_secret_var = tk.StringVar(value=cfg.get("bug_report_secret", "") or "Z3JlZW5pc2RheQ==")
-    premium = tk.BooleanVar(value=bool(cfg.get("premium", False)))
-    confirm_actions = tk.BooleanVar(value=bool(cfg.get("confirm_actions", False)))
-    spotify_media = tk.BooleanVar(value=bool(cfg.get("spotify_media", False)))
-    spotify_requires = tk.BooleanVar(value=bool(cfg.get("spotify_requires_keyword", False)))
-    spotify_keywords = tk.StringVar(value=str(cfg.get("spotify_keywords", "spotify")))
-    news_source = tk.StringVar(value=cfg.get("news_source", "BBC"))
-    birthday_month = tk.StringVar(value=str(cfg.get("birthday_month", "")))
-    birthday_day = tk.StringVar(value=str(cfg.get("birthday_day", "")))
+    tts_voice = SimpleVar(value=cfg.get("tts_voice", "af_heart"))
+    personality_mode = SimpleVar(value=cfg.get("personality_mode", "default"))
+    bug_report_secret_var = SimpleVar(value=cfg.get("bug_report_secret", "") or "Z3JlZW5pc2RheQ==")
+    premium = SimpleVar(value=bool(cfg.get("premium", False)))
+    confirm_actions = SimpleVar(value=bool(cfg.get("confirm_actions", False)))
+    spotify_media = SimpleVar(value=bool(cfg.get("spotify_media", False)))
+    spotify_requires = SimpleVar(value=bool(cfg.get("spotify_requires_keyword", False)))
+    spotify_keywords = SimpleVar(value=str(cfg.get("spotify_keywords", "spotify")))
+    news_source = SimpleVar(value=cfg.get("news_source", "BBC"))
+    birthday_month = SimpleVar(value=str(cfg.get("birthday_month", "")))
+    birthday_day = SimpleVar(value=str(cfg.get("birthday_day", "")))
 
     actions = cfg.get("actions", [])
     if not isinstance(actions, list):
@@ -529,31 +602,31 @@ def main() -> None:
         if isinstance(k, dict)
     ]
 
-    status_var = tk.StringVar(value="Idle")
-    transcript_var = tk.StringVar(value="")
+    status_var = SimpleVar(value="Idle")
+    transcript_var = SimpleVar(value="")
 
     # Hook whisper model download status into the UI status bar
     import app as _app_module
-    _app_module.on_model_status = lambda msg: root.after(0, lambda m=msg: status_var.set(m))
-    app_name_var = tk.StringVar()
-    app_cmd_var = tk.StringVar()
-    alias_var = tk.StringVar()
-    alias_target_var = tk.StringVar()
-    phrase_var = tk.StringVar()
-    command_var = tk.StringVar()
-    discord_ch_name_var = tk.StringVar()
-    discord_ch_url_var = tk.StringVar()
-    discord_ch_server_var = tk.StringVar()
-    discord_bot_token_var = tk.StringVar(value=cfg.get("discord_bot_token", ""))
-    discord_server_id_var = tk.StringVar(value=cfg.get("discord_server_id", ""))
-    discord_srv_nickname_var = tk.StringVar()
-    discord_srv_id_var = tk.StringVar()
-    gemini_api_key_var = tk.StringVar(value=cfg.get("gemini_api_key", ""))
-    keybind_phrase_var = tk.StringVar()
-    keybind_key_var = tk.StringVar()
-    keybind_count_var = tk.StringVar(value="1")
+    _app_module.on_model_status = lambda msg: _bridge.post(lambda m=msg: status_var.set(m))
+    app_name_var = SimpleVar()
+    app_cmd_var = SimpleVar()
+    alias_var = SimpleVar()
+    alias_target_var = SimpleVar()
+    phrase_var = SimpleVar()
+    command_var = SimpleVar()
+    discord_ch_name_var = SimpleVar()
+    discord_ch_url_var = SimpleVar()
+    discord_ch_server_var = SimpleVar()
+    discord_bot_token_var = SimpleVar(value=cfg.get("discord_bot_token", ""))
+    discord_server_id_var = SimpleVar(value=cfg.get("discord_server_id", ""))
+    discord_srv_nickname_var = SimpleVar()
+    discord_srv_id_var = SimpleVar()
+    gemini_api_key_var = SimpleVar(value=cfg.get("gemini_api_key", ""))
+    keybind_phrase_var = SimpleVar()
+    keybind_key_var = SimpleVar()
+    keybind_count_var = SimpleVar(value="1")
 
-    def _bind_record_key_display(raw_var: tk.StringVar, display_var: tk.StringVar) -> None:
+    def _bind_record_key_display(raw_var: SimpleVar, display_var: SimpleVar) -> None:
         _syncing = {"raw": False, "display": False}
 
         def _sync_from_raw(*_args):
@@ -639,7 +712,7 @@ def main() -> None:
         except Exception:
             secs = 5
         data = {
-            "theme": "dark" if theme_var.get() else "light",
+            "theme": "dark",
             "mode": mode.get(),
             "language": language.get(),
             "seconds": secs,
@@ -687,14 +760,19 @@ def main() -> None:
     def _do_restart():
         try:
             listener.stop()
-            if tray_icon["icon"] is not None:
-                tray_icon["icon"].stop()
+            try:
+                if tray_icon["icon"] is not None:
+                    tray_icon["icon"].stop()
+            except Exception:
+                pass
+            _rpc_close()
             _release_mutex()
             script_path = os.path.abspath(__file__)
             subprocess.Popen([sys.executable, script_path])
-            root.after(0, root.destroy)
         except Exception as exc:
             print(f"Restart failed: {exc}")
+        finally:
+            os._exit(0)
 
     def _read_local_version() -> str:
         try:
@@ -822,7 +900,7 @@ def main() -> None:
             _release_mutex()
             script_path = os.path.abspath(__file__)
             subprocess.Popen([sys.executable, script_path])
-            root.destroy()
+            os._exit(0)
         except Exception as exc:
             _notify_error("Update Failed", str(exc))
 
@@ -831,11 +909,11 @@ def main() -> None:
             local = _read_local_version()
             latest = _fetch_latest_version()
             if latest and _parse_version(latest) > _parse_version(local):
-                root.after(0, lambda v=latest: _show_update_notice(v))
+                _bridge.post(lambda v=latest: _show_update_notice(v))
         except Exception:
             pass
 
-    def _record_hotkey(target_var: tk.StringVar) -> None:
+    def _record_hotkey(target_var: SimpleVar) -> None:
         try:
             from pynput import keyboard  # type: ignore
         except Exception:
@@ -938,7 +1016,7 @@ def main() -> None:
         _active_recorders.append(listener)
         listener.start()
 
-    def _record_hold_key(target_var: tk.StringVar) -> None:
+    def _record_hold_key(target_var: SimpleVar) -> None:
         try:
             from pynput import keyboard  # type: ignore
             from pynput import mouse as pynput_mouse  # type: ignore
@@ -1026,37 +1104,14 @@ def main() -> None:
 
     def _load_logo():
         logo_path = os.path.join(os.path.dirname(__file__), "data", "assets", "ipa_logo.png")
-        try:
-            from PIL import Image  # type: ignore
-
-            # Dark bg = gray17 ≈ #2b2b2b, Light bg = gray86 ≈ #dbdbdb
-            def _composite(src: Image.Image, bg_hex: str) -> Image.Image:
-                r = int(bg_hex[1:3], 16)
-                g = int(bg_hex[3:5], 16)
-                b = int(bg_hex[5:7], 16)
-                bg = Image.new("RGBA", src.size, (r, g, b, 255))
-                bg.paste(src, mask=src.split()[3])
-                return bg.convert("RGB")
-
-            target_h = 180
-            pil_src = Image.open(logo_path).convert("RGBA")
-            w, h = pil_src.size
-            target_w = int(w * target_h / h)
-            pil_src = pil_src.resize((target_w, target_h), Image.LANCZOS)
-
-            dark_img  = _composite(pil_src, "#2b2b2b")
-            light_img = _composite(pil_src, "#dbdbdb")
-
-            img = ctk.CTkImage(light_image=light_img, dark_image=dark_img, size=(target_w, target_h))
-            return img
-        except Exception:
-            return None
+        if os.path.exists(logo_path):
+            return logo_path
+        return None
 
     def _save():
         data = _build_config()
         save_config(data)
         _saved_config_signature[0] = _config_signature(data)
-        ctk.set_appearance_mode("dark" if theme_var.get() else "light")
         _apply_runtime_config()
         _refresh_save_prompt()
         _notify_info("Saved", "Configuration saved.")
@@ -1083,23 +1138,22 @@ def main() -> None:
         if not _background_active():
             return
         _stop_background()
-        root.after(120, _start_background)
+        QTimer.singleShot(120, _start_background)
 
     def _hide_inline_notice() -> None:
         if notice_frame is None:
             return
         if _notice_after_id["id"] is not None:
             try:
-                root.after_cancel(_notice_after_id["id"])
+                _notice_after_id["id"].stop()
             except Exception:
                 pass
             _notice_after_id["id"] = None
-        if str(notice_frame.winfo_manager()) == "grid":
-            notice_frame.grid_remove()
-        if notice_action_button is not None and str(notice_action_button.winfo_manager()) == "pack":
-            notice_action_button.pack_forget()
-        if notice_close_button is not None and str(notice_close_button.winfo_manager()) == "pack":
-            notice_close_button.pack_forget()
+        notice_frame.setVisible(False)
+        if notice_action_button is not None:
+            notice_action_button.setVisible(False)
+        if notice_close_button is not None:
+            notice_close_button.setVisible(False)
         _notice_action["callback"] = None
 
     def _run_notice_action() -> None:
@@ -1117,46 +1171,59 @@ def main() -> None:
     ) -> None:
         if notice_frame is None or notice_label is None:
             return
-        colors = {
-            "error": (("#fdecea", "#4a1f1f"), ("#8a1c1c", "#ffb4b4")),
-            "info": (("#e8f1fd", "#1f304a"), ("#1f4f8a", "#b7d4ff")),
-            "update": (("#fff4db", "#4a3a1f"), ("#8a6116", "#ffd67d")),
+        bg_colors = {
+            "error": ("#4a1f1f", "#ffb4b4"),
+            "info":  ("#1f304a", "#b7d4ff"),
+            "update": ("#4a3a1f", "#ffd67d"),
         }
-        frame_color, text_color = colors.get(tone, colors["error"])
-        notice_frame.configure(fg_color=frame_color)
-        notice_label.configure(text=message, text_color=text_color)
+        bg, fg = bg_colors.get(tone, bg_colors["error"])
+        notice_frame.setStyleSheet(f"background-color: {bg}; border-radius: 8px;")
+        notice_label.setStyleSheet(f"color: {fg}; font-size: 11px;")
+        notice_label.setText(message)
         if notice_action_button is not None:
             if action_text and callable(action_callback):
                 _notice_action["callback"] = action_callback
-                notice_action_button.configure(text=action_text, command=_run_notice_action)
-                if str(notice_action_button.winfo_manager()) != "pack":
-                    notice_action_button.pack(side="right", padx=(8, 0))
-            elif str(notice_action_button.winfo_manager()) == "pack":
-                notice_action_button.pack_forget()
+                notice_action_button.setText(action_text)
+                try:
+                    notice_action_button.clicked.disconnect()
+                except Exception:
+                    pass
+                notice_action_button.clicked.connect(_run_notice_action)
+                notice_action_button.setVisible(True)
+            else:
+                notice_action_button.setVisible(False)
         if notice_close_button is not None:
             if closable:
-                notice_close_button.configure(command=_hide_inline_notice)
-                if str(notice_close_button.winfo_manager()) != "pack":
-                    notice_close_button.pack(side="right", padx=(8, 0))
-            elif str(notice_close_button.winfo_manager()) == "pack":
-                notice_close_button.pack_forget()
-        notice_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 8))
+                try:
+                    notice_close_button.clicked.disconnect()
+                except Exception:
+                    pass
+                notice_close_button.clicked.connect(_hide_inline_notice)
+                notice_close_button.setVisible(True)
+            else:
+                notice_close_button.setVisible(False)
+        notice_frame.setVisible(True)
         if _notice_after_id["id"] is not None:
             try:
-                root.after_cancel(_notice_after_id["id"])
+                _notice_after_id["id"].stop()
             except Exception:
                 pass
-        _notice_after_id["id"] = root.after(duration_ms, _hide_inline_notice) if duration_ms and duration_ms > 0 else None
+            _notice_after_id["id"] = None
+        if duration_ms and duration_ms > 0:
+            t = QTimer()
+            t.setSingleShot(True)
+            t.timeout.connect(_hide_inline_notice)
+            t.start(duration_ms)
+            _notice_after_id["id"] = t
 
     def _hide_update_notice() -> None:
         if update_frame is None:
             return
-        if str(update_frame.winfo_manager()) == "grid":
-            update_frame.grid_remove()
-        if update_action_button is not None and str(update_action_button.winfo_manager()) == "pack":
-            update_action_button.pack_forget()
-        if update_close_button is not None and str(update_close_button.winfo_manager()) == "pack":
-            update_close_button.pack_forget()
+        update_frame.setVisible(False)
+        if update_action_button is not None:
+            update_action_button.setVisible(False)
+        if update_close_button is not None:
+            update_close_button.setVisible(False)
         _update_action["callback"] = None
 
     def _dismiss_update_notice(version: str | None = None) -> None:
@@ -1186,17 +1253,24 @@ def main() -> None:
         if update_frame is None or update_label is None:
             return
         prefix = "Test update available." if test else f"New update available: v{version}."
-        update_label.configure(text=f"{prefix} Check here to update.")
+        update_label.setText(f"{prefix} Check here to update.")
         if update_action_button is not None:
             _update_action["callback"] = _check_for_updates
-            update_action_button.configure(text="Check Updates", command=_run_update_action)
-            if str(update_action_button.winfo_manager()) != "pack":
-                update_action_button.pack(side="right", padx=(8, 0))
+            update_action_button.setText("Check Updates")
+            try:
+                update_action_button.clicked.disconnect()
+            except Exception:
+                pass
+            update_action_button.clicked.connect(_run_update_action)
+            update_action_button.setVisible(True)
         if update_close_button is not None:
-            update_close_button.configure(command=lambda v=version: _dismiss_update_notice(v))
-            if str(update_close_button.winfo_manager()) != "pack":
-                update_close_button.pack(side="right", padx=(8, 0))
-        update_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 8))
+            try:
+                update_close_button.clicked.disconnect()
+            except Exception:
+                pass
+            update_close_button.clicked.connect(lambda checked=False, v=version: _dismiss_update_notice(v))
+            update_close_button.setVisible(True)
+        update_frame.setVisible(True)
 
     def _stop_active_recorders() -> None:
         while _active_recorders:
@@ -1218,7 +1292,11 @@ def main() -> None:
                         return
                     callback()
 
-                return root.after(delay_ms, _run)
+                def _schedule():
+                    QTimer.singleShot(delay_ms, _run)
+
+                _bridge.post(_schedule)
+                return None  # no cancel handle needed
 
             def destroy(self):
                 if self._closed:
@@ -1228,75 +1306,43 @@ def main() -> None:
                     return
                 if record_status_label is not None:
                     try:
-                        record_status_label.configure(textvariable=None, text="Listening for your input...")
+                        record_status_label.setText("Listening for your input...")
                     except Exception:
                         pass
                 _stop_active_recorders()
-                if record_backdrop is not None and str(record_backdrop.winfo_manager()) == "place":
+                if record_backdrop is not None:
                     try:
-                        record_backdrop.place_forget()
+                        record_backdrop.hide_over()
                     except Exception:
                         pass
 
         _stop_active_recorders()
 
         if record_backdrop is None or record_overlay is None or record_title_label is None or record_message_label is None or record_status_label is None:
-            status = tk.StringVar(value="Listening for your input...")
+            status = SimpleVar(value="Listening for your input...")
             return _InlineRecordDialog(-1), status
 
         _record_overlay_session["id"] += 1
         session_id = _record_overlay_session["id"]
-        status = tk.StringVar(value="Listening for your input...")
+        status = SimpleVar(value="Listening for your input...")
+        status.trace_add("write", lambda *_: record_status_label.setText(status.get()))
 
-        record_title_label.configure(text=title)
-        record_message_label.configure(text=instruction)
-        record_status_label.configure(textvariable=status)
-
-        root.update_idletasks()
-        overlay_width = max(360, min(460, root.winfo_width() - 48))
-        record_overlay.configure(width=overlay_width)
-        record_backdrop.place(x=0, y=0, relwidth=1, relheight=1)
-        record_backdrop.lift()
-        root.focus_force()
+        record_title_label.setText(title)
+        record_message_label.setText(instruction)
+        record_status_label.setText(status.get())
+        record_backdrop.show_over()
+        root.activateWindow()
         return _InlineRecordDialog(session_id), status
 
     def _ask_ui_confirm(title: str, message: str) -> bool:
-        result = {"value": False}
-        dialog = ctk.CTkToplevel(root)
-        dialog.title(title)
-        dialog.geometry("420x210")
-        dialog.resizable(False, False)
-        dialog.transient(root)
-        dialog.grab_set()
-        frame = ctk.CTkFrame(dialog, corner_radius=12)
-        frame.pack(fill="both", expand=True, padx=14, pady=14)
-        ctk.CTkLabel(frame, text=title, font=("Segoe UI", 16, "bold")).pack(
-            anchor="w", padx=16, pady=(16, 8)
-        )
-        ctk.CTkLabel(
-            frame,
-            text=message,
-            wraplength=360,
-            justify="left",
-            font=("Segoe UI", 12),
-        ).pack(anchor="w", padx=16, pady=(0, 16))
-
-        btn_row = ctk.CTkFrame(frame, fg_color="transparent")
-        btn_row.pack(fill="x", padx=16, pady=(0, 16))
-
-        def _finish(value: bool) -> None:
-            result["value"] = value
-            dialog.destroy()
-
-        ctk.CTkButton(btn_row, text="Cancel", command=lambda: _finish(False), width=100).pack(side="right")
-        ctk.CTkButton(btn_row, text="Confirm", command=lambda: _finish(True), width=100).pack(side="right", padx=(0, 8))
-        dialog.wait_window()
-        return result["value"]
+        result = QMessageBox.question(root, title, message,
+                                      QMessageBox.Yes | QMessageBox.No)
+        return result == QMessageBox.Yes
 
     def _on_mode_change() -> None:
         if _background_active():
             _stop_background()
-            root.after(80, _start_background)
+            QTimer.singleShot(80, _start_background)
         else:
             _runtime_mode["value"] = "idle"
             status_var.set("Idle")
@@ -1306,13 +1352,7 @@ def main() -> None:
         if save_button is None:
             return
         is_dirty = _config_signature() != _saved_config_signature[0]
-        manager = str(save_button.winfo_manager())
-        if is_dirty:
-            if manager != "grid":
-                save_button.grid(row=0, column=1, sticky="e", padx=(0, 12), pady=8)
-        else:
-            if manager == "grid":
-                save_button.grid_remove()
+        save_button.setVisible(is_dirty)
 
     global UI_NOTIFY_INFO, UI_NOTIFY_ERROR, UI_CONFIRM
     UI_NOTIFY_INFO = _show_ui_info
@@ -1323,11 +1363,11 @@ def main() -> None:
     def _refresh_actions():
         if actions_textbox is None:
             return
-        actions_textbox.delete(0, "end")
+        actions_textbox.clear()
         for a in actions:
             phrase = a.get("phrase", "")
             command = a.get("command", "")
-            actions_textbox.insert("end", f"{phrase}  ->  {command}")
+            actions_textbox.addItem(f"{phrase}  ->  {command}")
 
     def _add_action():
         phrase = phrase_var.get().strip()
@@ -1344,8 +1384,8 @@ def main() -> None:
     def _remove_action():
         if not actions or actions_textbox is None:
             return
-        selection = actions_textbox.curselection()
-        idx = selection[0] if selection else len(actions) - 1
+        row = actions_textbox.currentRow()
+        idx = row if row >= 0 else len(actions) - 1
         if 0 <= idx < len(actions):
             actions.pop(idx)
         _refresh_actions()
@@ -1355,18 +1395,18 @@ def main() -> None:
     def _refresh_apps():
         if apps_textbox is None:
             return
-        apps_textbox.delete(0, "end")
+        apps_textbox.clear()
         for a in apps:
             name = a.get("name", "")
             command = a.get("command", "")
-            apps_textbox.insert("end", f"{name}  ->  {command}")
+            apps_textbox.addItem(f"{name}  ->  {command}")
 
     def _refresh_aliases():
         if aliases_textbox is None:
             return
-        aliases_textbox.delete(0, "end")
+        aliases_textbox.clear()
         for a in aliases:
-            aliases_textbox.insert("end", f"{a.get('alias')}  ->  {a.get('target')}")
+            aliases_textbox.addItem(f"{a.get('alias')}  ->  {a.get('target')}")
 
     def _add_alias():
         alias = alias_var.get().strip().lower()
@@ -1383,8 +1423,8 @@ def main() -> None:
     def _remove_alias():
         if not aliases:
             return
-        sel = aliases_textbox.curselection() if aliases_textbox else ()
-        idx = sel[0] if sel else len(aliases) - 1
+        row = aliases_textbox.currentRow() if aliases_textbox else -1
+        idx = row if row >= 0 else len(aliases) - 1
         if 0 <= idx < len(aliases):
             aliases.pop(idx)
         _refresh_aliases()
@@ -1415,8 +1455,8 @@ def main() -> None:
     def _remove_app():
         if not apps:
             return
-        sel = apps_textbox.curselection() if apps_textbox else ()
-        idx = sel[0] if sel else len(apps) - 1
+        row = apps_textbox.currentRow() if apps_textbox else -1
+        idx = row if row >= 0 else len(apps) - 1
         if 0 <= idx < len(apps):
             apps.pop(idx)
         _refresh_apps()
@@ -1426,9 +1466,9 @@ def main() -> None:
     def _refresh_discord_servers():
         if discord_servers_textbox is None:
             return
-        discord_servers_textbox.delete(0, "end")
+        discord_servers_textbox.clear()
         for s in discord_servers:
-            discord_servers_textbox.insert("end", f"{s.get('nickname')}  ->  {s.get('server_id')}")
+            discord_servers_textbox.addItem(f"{s.get('nickname')}  ->  {s.get('server_id')}")
 
     def _add_discord_server():
         nickname = discord_srv_nickname_var.get().strip().lower()
@@ -1445,8 +1485,8 @@ def main() -> None:
     def _remove_discord_server():
         if discord_servers_textbox is None or not discord_servers:
             return
-        sel = discord_servers_textbox.curselection()
-        idx = sel[0] if sel else len(discord_servers) - 1
+        row = discord_servers_textbox.currentRow()
+        idx = row if row >= 0 else len(discord_servers) - 1
         discord_servers.pop(idx)
         _refresh_discord_servers()
         _refresh_save_prompt()
@@ -1455,11 +1495,11 @@ def main() -> None:
     def _refresh_discord_channels():
         if discord_channels_textbox is None:
             return
-        discord_channels_textbox.delete(0, "end")
+        discord_channels_textbox.clear()
         for ch in discord_channels:
             server = ch.get("server", "")
             prefix = f"[{server}] " if server else ""
-            discord_channels_textbox.insert("end", f"{prefix}#{ch.get('name')}  ->  {ch.get('url')}")
+            discord_channels_textbox.addItem(f"{prefix}#{ch.get('name')}  ->  {ch.get('url')}")
 
     def _add_discord_channel():
         name = discord_ch_name_var.get().strip().lower()
@@ -1478,8 +1518,8 @@ def main() -> None:
     def _remove_discord_channel():
         if discord_channels_textbox is None or not discord_channels:
             return
-        sel = discord_channels_textbox.curselection()
-        idx = sel[0] if sel else len(discord_channels) - 1
+        row = discord_channels_textbox.currentRow()
+        idx = row if row >= 0 else len(discord_channels) - 1
         discord_channels.pop(idx)
         _refresh_discord_channels()
         _refresh_save_prompt()
@@ -1488,13 +1528,13 @@ def main() -> None:
     def _refresh_keybinds():
         if keybinds_textbox is None:
             return
-        keybinds_textbox.delete(0, "end")
+        keybinds_textbox.clear()
         for kb in keybinds:
             count = kb.get("count", 1)
             suffix = f" x{count}" if int(count) > 1 else ""
-            keybinds_textbox.insert("end", f"{kb.get('phrase')}  ->  {kb.get('key')}{suffix}")
+            keybinds_textbox.addItem(f"{kb.get('phrase')}  ->  {kb.get('key')}{suffix}")
 
-    def _record_keybind_step(target_var: tk.StringVar) -> None:
+    def _record_keybind_step(target_var: SimpleVar) -> None:
         """Record a single key/combo and append it as a macro step."""
         try:
             from pynput import keyboard as _kb  # type: ignore
@@ -1612,8 +1652,8 @@ def main() -> None:
     def _remove_keybind():
         if not keybinds or keybinds_textbox is None:
             return
-        selection = keybinds_textbox.curselection()
-        idx = selection[0] if selection else len(keybinds) - 1
+        row = keybinds_textbox.currentRow()
+        idx = row if row >= 0 else len(keybinds) - 1
         if 0 <= idx < len(keybinds):
             keybinds.pop(idx)
         _refresh_keybinds()
@@ -1662,7 +1702,7 @@ def main() -> None:
     def _reset_idle_timer():
         if _idle_timer["handle"] is not None:
             try:
-                root.after_cancel(_idle_timer["handle"])
+                _idle_timer["handle"].stop()
             except Exception:
                 pass
             _idle_timer["handle"] = None
@@ -1679,10 +1719,13 @@ def main() -> None:
                 from personality import get_idle_thought
                 _tts_speak(get_idle_thought())
             threading.Thread(target=_speak, daemon=True).start()
-            # reschedule for next idle period
             _reset_idle_timer()
 
-        _idle_timer["handle"] = root.after(idle_ms, _fire_idle)
+        t = QTimer()
+        t.setSingleShot(True)
+        t.timeout.connect(_fire_idle)
+        t.start(idle_ms)
+        _idle_timer["handle"] = t
 
     def _start_background():
         try:
@@ -1698,10 +1741,10 @@ def main() -> None:
                     holdkey.get(),
                     model_path=_model_dir(),
                     confirm_fn=_confirm_prompt,
-                    on_text=lambda t: root.after(0, lambda: _update_transcript(t)),
+                    on_text=lambda t: _bridge.post(lambda _t=t: _update_transcript(_t)),
                     restart_fn=_do_restart,
-                    on_record_start=lambda: (root.after(0, lambda: status_var.set("Recording...")), _rpc_set("Recording...")),
-                    on_record_end=lambda: (root.after(0, lambda: status_var.set(_hold_label)), _rpc_set("Listening...")),
+                    on_record_start=lambda: (_bridge.post(lambda: status_var.set("Recording...")), _rpc_set("Recording...")),
+                    on_record_end=lambda: (_bridge.post(lambda: status_var.set(_hold_label)), _rpc_set("Listening...")),
                 )
                 status_var.set(_hold_label)
                 _rpc_set("Listening...")
@@ -1712,10 +1755,10 @@ def main() -> None:
                     hotkey.get(),
                     model_path=_model_dir(),
                     confirm_fn=_confirm_prompt,
-                    on_text=lambda t: root.after(0, lambda: _update_transcript(t)),
+                    on_text=lambda t: _bridge.post(lambda _t=t: _update_transcript(_t)),
                     restart_fn=_do_restart,
-                    on_record_start=lambda: (root.after(0, lambda: status_var.set("Recording...")), _rpc_set("Recording...")),
-                    on_record_end=lambda: (root.after(0, lambda: status_var.set(_toggle_label)), _rpc_set("Listening...")),
+                    on_record_start=lambda: (_bridge.post(lambda: status_var.set("Recording...")), _rpc_set("Recording...")),
+                    on_record_end=lambda: (_bridge.post(lambda: status_var.set(_toggle_label)), _rpc_set("Listening...")),
                 )
                 status_var.set(_toggle_label)
                 _rpc_set("Listening...")
@@ -1743,15 +1786,13 @@ def main() -> None:
         def _do():
             if msg == "Muted":
                 status_var.set("Muted")
-                # Keep polling to hold the Muted label while muted
                 def _hold_muted():
                     from skills import is_muted
                     if is_muted():
                         status_var.set("Muted")
-                        root.after(500, _hold_muted)
-                root.after(500, _hold_muted)
+                        QTimer.singleShot(500, _hold_muted)
+                QTimer.singleShot(500, _hold_muted)
             else:
-                # Restore the real listening label based on current mode
                 m = _runtime_mode.get("value", "idle")
                 if m == "hold":
                     status_var.set(f"Listening (hold {holdkey.get()})")
@@ -1761,7 +1802,7 @@ def main() -> None:
                     status_var.set("Wake word active (say 'vera')")
                 else:
                     status_var.set("Idle")
-        root.after(0, _do)
+        _bridge.post(_do)
 
     from skills import set_mute_status_callback, set_groq_flash_callback
     set_mute_status_callback(_mute_status_update)
@@ -1778,14 +1819,18 @@ def main() -> None:
             status_var.set("AI response")
             if _groq_flash_timer["handle"] is not None:
                 try:
-                    root.after_cancel(_groq_flash_timer["handle"])
+                    _groq_flash_timer["handle"].stop()
                 except Exception:
                     pass
             def _restore():
                 if status_var.get() == "AI response":
                     status_var.set(prev)
-            _groq_flash_timer["handle"] = root.after(2000, _restore)
-        root.after(150, _do)
+            t = QTimer()
+            t.setSingleShot(True)
+            t.timeout.connect(_restore)
+            t.start(2000)
+            _groq_flash_timer["handle"] = t
+        _bridge.post(lambda: QTimer.singleShot(150, _do))
 
     set_groq_flash_callback(_groq_flash)
 
@@ -1797,8 +1842,8 @@ def main() -> None:
                 _tts_speak(f"Reminder: {msg}", bypass_mute=True)
         except Exception:
             pass
-        root.after(30000, _check_reminders)
-    root.after(30000, _check_reminders)
+        QTimer.singleShot(30000, _check_reminders)
+    QTimer.singleShot(30000, _check_reminders)
 
     # --- Wake Word ---
     _WAKE_PHRASES = {"vera"}
@@ -1864,12 +1909,12 @@ def main() -> None:
                             segs, _ = model.transcribe(cmd_audio, language="en", beam_size=1, vad_filter=True)
                             command = " ".join(seg.text.strip() for seg in segs).strip()
                             if command:
-                                root.after(0, lambda t=command: _update_transcript(t))
+                                _bridge.post(lambda t=command: _update_transcript(t))
                                 if not handle_transcript(command, allow_prompt=True, confirm_fn=_confirm_prompt, restart_fn=_do_restart):
                                     log_unmatched(command)
         except Exception as exc:
             _runtime_mode["value"] = "idle"
-            root.after(0, lambda e=str(exc): (
+            _bridge.post(lambda e=str(exc): (
                 status_var.set("Wake word listener failed"),
                 _show_inline_notice(f"Wake word listener failed: {e}", tone="error")
             ))
@@ -1940,29 +1985,36 @@ def main() -> None:
                 return img
 
         def _show_window(_=None):
-            root.after(0, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+            _bridge.post(lambda: (root.show(), root.raise_(), root.activateWindow()))
 
         def _hide_window(_=None):
-            root.after(0, root.withdraw)
+            _bridge.post(root.hide)
 
         def _exit_app(_=None):
-            _rpc_close()
-            listener.stop()
-            if tray_icon["icon"] is not None:
-                tray_icon["icon"].stop()
-            root.after(0, root.destroy)
+            try:
+                _rpc_close()
+                listener.stop()
+                if tray_icon["icon"] is not None:
+                    tray_icon["icon"].stop()
+                _release_mutex()
+            except Exception:
+                pass
+            finally:
+                os._exit(0)
 
         def _restart_app(_=None):
             try:
                 listener.stop()
                 if tray_icon["icon"] is not None:
                     tray_icon["icon"].stop()
+                _rpc_close()
                 _release_mutex()
                 script_path = os.path.abspath(__file__)
                 subprocess.Popen([sys.executable, script_path])
-                root.destroy()
             except Exception as exc:
                 print(f"Failed to restart: {exc}")
+            finally:
+                os._exit(0)
 
         menu = pystray.Menu(
             pystray.MenuItem("Show", _show_window, default=True),
@@ -1987,22 +2039,12 @@ def main() -> None:
 
     def _on_close():
         if tray_ready["ok"]:
-            root.withdraw()
+            root.hide()
         else:
             _notify_info("Tray Unavailable", "System tray support isn't available. Install deps and restart.")
 
-    def _on_minimize(event):
-        if root.state() == "iconic":
-            if tray_ready["ok"]:
-                root.withdraw()
-
-    def _poll_minimize():
-        if root.state() == "iconic" and tray_ready["ok"]:
-            root.withdraw()
-        root.after(400, _poll_minimize)
-
     def _install_deps():
-        deps = ["sounddevice", "faster-whisper", "pynput", "pystray", "pillow", "customtkinter", "pyttsx3"]
+        deps = ["sounddevice", "faster-whisper", "pynput", "pystray", "pillow", "PySide6", "pyttsx3"]
         status_var.set("Installing dependencies...")
 
         def _run():
@@ -2018,23 +2060,16 @@ def main() -> None:
 
     def _create_bug_report():
         # ── Description dialog ────────────────────────────────────────────────
-        desc_dialog = ctk.CTkInputDialog(
-            text="Describe the bug (what went wrong?):",
-            title="Bug Report"
-        )
-        description = desc_dialog.get_input()
-        if description is None:
+        description, ok = QInputDialog.getText(root, "Bug Report", "Describe the bug (what went wrong?):")
+        if not ok:
             return
         description = description.strip()
         if not description:
             _notify_info("Bug Report", "Description is required.")
             return
 
-        user_dialog = ctk.CTkInputDialog(
-            text="Your Discord username (optional — press Enter to skip):",
-            title="Bug Report"
-        )
-        discord_username = (user_dialog.get_input() or "").strip()
+        discord_username, _ = QInputDialog.getText(root, "Bug Report", "Your Discord username (optional — press Enter to skip):")
+        discord_username = (discord_username or "").strip()
 
         # ── Zip logs ──────────────────────────────────────────────────────────
         base_dir = os.path.dirname(__file__)
@@ -2123,12 +2158,11 @@ def main() -> None:
         if not os.path.exists(src):
             _notify_info("Export Transcripts", "No transcript log found yet.")
             return
-        from tkinter import filedialog
-        dest = filedialog.asksaveasfilename(
-            defaultextension=".log",
-            filetypes=[("Log files", "*.log"), ("Text files", "*.txt"), ("All files", "*.*")],
-            initialfile="transcripts.log",
-            title="Export Transcripts",
+        dest, _ = QFileDialog.getSaveFileName(
+            root,
+            "Export Transcripts",
+            "transcripts.log",
+            "Log files (*.log);;Text files (*.txt);;All files (*.*)",
         )
         if not dest:
             return
@@ -2222,7 +2256,6 @@ def main() -> None:
         "tts_voice": tts_voice,
         "tts_voice_choices": tts_voice_choices,
         "personality_mode": personality_mode,
-        "theme_var": theme_var,
         "spotify_media": spotify_media,
         "spotify_requires": spotify_requires,
         "spotify_keywords": spotify_keywords,
@@ -2288,7 +2321,7 @@ def main() -> None:
         "LANG_CHOICES": LANG_CHOICES,
     }
 
-    widgets = ui.build_ui(root=root, state=state, callbacks=callbacks_ui, constants=constants)
+    widgets = ui.build_ui(window=root, state=state, callbacks=callbacks_ui, constants=constants)
     apps_textbox = widgets.get("apps_textbox")
     aliases_textbox = widgets.get("aliases_textbox")
     actions_textbox = widgets.get("actions_textbox")
@@ -2315,20 +2348,17 @@ def main() -> None:
     transcript_history = []
 
     if save_button is not None:
-        def _save_button_enter(_event=None):
-            try:
-                save_button.configure(text="Save changes")
-            except Exception:
-                pass
-
-        def _save_button_leave(_event=None):
-            try:
-                save_button.configure(text="Unsaved changes")
-            except Exception:
-                pass
-
-        save_button.bind("<Enter>", _save_button_enter)
-        save_button.bind("<Leave>", _save_button_leave)
+        class _SaveHoverFilter(QObject):
+            def eventFilter(self, obj, event):
+                from PySide6.QtCore import QEvent
+                if obj is save_button:
+                    if event.type() == QEvent.Enter:
+                        save_button.setText("Save changes")
+                    elif event.type() == QEvent.Leave:
+                        save_button.setText("Unsaved changes")
+                return False
+        _save_hover_filter = _SaveHoverFilter(save_button)
+        save_button.installEventFilter(_save_hover_filter)
 
     def _update_transcript(text: str):
         transcript_var.set(text)
@@ -2337,11 +2367,11 @@ def main() -> None:
         if len(transcript_history) > 10:
             transcript_history.pop(0)
         if history_textbox is not None:
-            history_textbox.configure(state="normal")
-            history_textbox.delete("1.0", "end")
+            history_textbox.setReadOnly(False)
+            history_textbox.clear()
             for line in reversed(transcript_history):
-                history_textbox.insert("end", line + "\n")
-            history_textbox.configure(state="disabled")
+                history_textbox.append(line)
+            history_textbox.setReadOnly(True)
     # =========================================================================
     #  Init
     # =========================================================================
@@ -2353,7 +2383,6 @@ def main() -> None:
     _refresh_keybinds()
     _saved_config_signature[0] = _config_signature()
     for _var in (
-        theme_var,
         mode,
         language,
         seconds,
@@ -2380,58 +2409,27 @@ def main() -> None:
     _refresh_save_prompt()
 
     if loading_overlay is not None:
-        loading_overlay.place(x=0, y=0, relwidth=1, relheight=1)
-        loading_overlay.lift()
+        loading_overlay.show_over()
 
     def _animate_launch_reveal(on_done) -> None:
-        if loading_overlay is None or str(loading_overlay.winfo_manager()) != "place":
-            on_done()
-            return
-
-        root.update_idletasks()
-        total_height = max(root.winfo_height(), 1)
-        steps = 8
-        duration_ms = 180
-
-        def _step(index: int) -> None:
-            if loading_overlay is None or str(loading_overlay.winfo_manager()) != "place":
-                on_done()
-                return
-            progress = index / steps
-            eased = 1 - ((1 - progress) ** 2)
-            offset = -int(total_height * eased)
-            try:
-                loading_overlay.place_configure(x=0, y=offset, relwidth=1, relheight=1)
-            except Exception:
-                on_done()
-                return
-            if index >= steps:
-                try:
-                    loading_overlay.place_forget()
-                except Exception:
-                    pass
-                on_done()
-                return
-            root.after(max(1, duration_ms // steps), lambda: _step(index + 1))
-
-        _step(1)
+        if loading_overlay is not None:
+            loading_overlay.hide_over()
+        on_done()
 
     def _finish_launch():
         if loading_progress is not None:
             try:
-                loading_progress.stop()
+                loading_progress.setRange(0, 1)
+                loading_progress.setValue(1)
             except Exception:
                 pass
 
         def _after_reveal():
-            try:
-                root.lift()
-                root.focus_force()
-            except Exception:
-                pass
+            root.raise_()
+            root.activateWindow()
             threading.Thread(target=_startup_update_check, daemon=True).start()
             if _test_update_alert:
-                root.after(500, lambda: _show_update_notice("TEST", test=True))
+                QTimer.singleShot(500, lambda: _show_update_notice("TEST", test=True))
             if not cfg.get("wizard_done"):
                 _run_wizard()
             else:
@@ -2447,13 +2445,11 @@ def main() -> None:
 
         _animate_launch_reveal(_after_reveal)
 
-    root.after(500, _finish_launch)
+    QTimer.singleShot(500, _finish_launch)
 
-    root.protocol("WM_DELETE_WINDOW", _on_close)
-    root.bind("<Unmap>", _on_minimize)
+    root.show()
     _start_tray()
-    _poll_minimize()
-    root.mainloop()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
@@ -2468,15 +2464,7 @@ if __name__ == "__main__":
             f.write(traceback.format_exc())
             f.write("\n")
         try:
-            import tkinter as tk
-            from tkinter import messagebox
-
-            root = tk.Tk()
-            root.withdraw()
-            messagebox.showerror(
-                "Assistant Error",
-                f"The assistant crashed. See log:\n{log_path}",
-            )
-            root.destroy()
+            _crash_app = QApplication.instance() or QApplication(sys.argv)
+            QMessageBox.critical(None, "Assistant Error", f"The assistant crashed. See log:\n{log_path}")
         except Exception:
             pass

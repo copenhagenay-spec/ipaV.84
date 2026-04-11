@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.97.0
+- UI rebuilt on PySide6/Qt6 — eliminates scroll tearing, uses native OS rendering
+- Silent installer — pip, espeak-ng, and Kokoro model files all download and install automatically with progress shown in the installer UI (no terminal window)
+- Listening mode redesigned as a segmented pill control — all three modes visible without scrolling
+- Dark mode only — light mode removed
+- Fixed: dual process on voice restart — old instance now hard-exits cleanly
+- Fixed: AI response status bar not flashing after Groq responses
+- Fixed: record overlay getting stuck when triggered from background thread
+- Fixed: list widget scroll bleeding into parent scroll area
+- Key bind display: angle brackets stripped from key names (e.g. `caps_lock` instead of `<caps_lock>`)
+- Utilities section: all buttons unified to secondary style
+
 ## 0.89.0
 - Bug report now submits to Discord automatically — creates a private ticket with description, VERA version, and full log zip attached
 - Description and Discord username prompts added to bug report flow

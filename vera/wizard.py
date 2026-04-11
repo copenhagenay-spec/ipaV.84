@@ -1,4 +1,4 @@
-"""Setup wizard UI for VERA."""
+"""Setup wizard UI for VERA (PySide6)."""
 
 from __future__ import annotations
 
@@ -8,9 +8,14 @@ import sys
 import os
 import zipfile
 import urllib.request
-from tkinter import messagebox
 
-import customtkinter as ctk
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QScrollArea, QWidget,
+    QLabel, QLineEdit, QPushButton, QCheckBox, QRadioButton,
+    QButtonGroup, QComboBox, QProgressBar, QFrame, QMessageBox,
+)
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QIcon
 
 
 def _create_shortcut():
@@ -26,7 +31,6 @@ def _create_shortcut():
         shortcut_path = os.path.join(desktop, "VERA.lnk")
         start_path = os.path.join(start_menu, "VERA.lnk")
 
-        # Remove stale entries to prevent "(2)" duplicates
         for stale in [
             os.path.join(start_menu, "VERA.lnk"),
             os.path.join(start_menu, "VERA (2).lnk"),
@@ -57,45 +61,15 @@ def _create_shortcut():
 
 
 def run_wizard(
-    root,
+    parent,
     state: dict,
     callbacks: dict,
     constants: dict,
     model_urls: dict,
 ):
-    wizard = ctk.CTkToplevel(root)
-    wizard.title("VERA Setup Wizard")
-    wizard.geometry("560x520")
-    wizard.resizable(True, True)
-    wizard.transient(root)
-    wizard.grab_set()
-    try:
-        icon_path = os.path.join(os.path.dirname(__file__), "data", "assets", "ipa.ico")
-        if os.path.exists(icon_path):
-            wizard.iconbitmap(icon_path)
-            wizard.after(200, lambda: wizard.iconbitmap(icon_path))
-    except Exception:
-        pass
-
-    # Scrollable content
-    scroll = ctk.CTkScrollableFrame(wizard)
-    scroll.pack(fill="both", expand=True, padx=10, pady=10)
-
     HOTKEY_CHOICES = constants["HOTKEY_CHOICES"]
     LANG_CHOICES = constants["LANG_CHOICES"]
 
-    import tkinter as tk
-    create_shortcut_var = tk.IntVar(value=1)
-
-    mode = state["mode"]
-    language = state["language"]
-    seconds = state["seconds"]
-    hotkey = state["hotkey"]
-    holdkey = state["holdkey"]
-    spotify_media = state["spotify_media"]
-    spotify_requires = state["spotify_requires"]
-
-    _model_present = callbacks["model_present"]
     _record_hotkey = callbacks["record_hotkey"]
     _record_hold_key = callbacks["record_hold_key"]
     _import_steam = callbacks["import_steam"]
@@ -103,150 +77,216 @@ def run_wizard(
     _save_config = callbacks["save_config"]
     _start_background = callbacks["start_background"]
 
-    # Progress bar widgets — created once, shown/hidden as needed
-    import tkinter as _tk
-    _dl_progress_var = _tk.DoubleVar(value=0.0)
-    _dl_status_var = _tk.StringVar(value="")
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("VERA Setup Wizard")
+    dialog.resize(560, 520)
+    dialog.setModal(True)
 
-    def _download_model(lang: str, url: str):
-        dest_root = os.path.join(os.path.dirname(__file__), "data", "model")
-        os.makedirs(dest_root, exist_ok=True)
-        zip_path = os.path.join(dest_root, f"{lang}.zip")
-        extract_dir = os.path.join(dest_root, lang)
-        os.makedirs(extract_dir, exist_ok=True)
+    try:
+        icon_path = os.path.join(os.path.dirname(__file__), "data", "assets", "ipa.ico")
+        if os.path.exists(icon_path):
+            dialog.setWindowIcon(QIcon(icon_path))
+    except Exception:
+        pass
 
-        def _reporthook(block_num, block_size, total_size):
-            if total_size > 0:
-                pct = min(block_num * block_size / total_size, 1.0)
-                mb_done = block_num * block_size / 1_048_576
-                mb_total = total_size / 1_048_576
-                wizard.after(0, lambda p=pct, d=mb_done, t=mb_total: (
-                    _dl_progress_var.set(p),
-                    _dl_status_var.set(f"Downloading... {d:.1f} / {t:.1f} MB"),
-                ))
+    # --- Outer layout ---
+    outer_layout = QVBoxLayout(dialog)
+    outer_layout.setContentsMargins(0, 0, 0, 0)
 
-        def _run():
-            try:
-                wizard.after(0, lambda: (
-                    _dl_progress_var.set(0.0),
-                    _dl_status_var.set("Starting download..."),
-                    _dl_progress_frame.pack(fill="x", padx=10, pady=(4, 0)),
-                ))
-                urllib.request.urlretrieve(url, zip_path, reporthook=_reporthook)
-                wizard.after(0, lambda: _dl_status_var.set("Extracting..."))
-                import shutil
-                for item in os.listdir(extract_dir):
-                    item_path = os.path.join(extract_dir, item)
-                    if os.path.isdir(item_path):
-                        shutil.rmtree(item_path)
-                with zipfile.ZipFile(zip_path, "r") as zf:
-                    zf.extractall(extract_dir)
-                wizard.after(0, lambda: (
-                    _dl_progress_var.set(1.0),
-                    _dl_status_var.set("Done!"),
-                ))
-                messagebox.showinfo("Done", f"{lang.upper()} model downloaded.")
-                wizard.after(0, lambda: _dl_progress_frame.pack_forget())
-            except Exception as exc:
-                wizard.after(0, lambda: _dl_progress_frame.pack_forget())
-                messagebox.showerror("Download Error", str(exc))
+    scroll_area = QScrollArea()
+    scroll_area.setWidgetResizable(True)
+    scroll_area.setFrameShape(QFrame.NoFrame)
+    outer_layout.addWidget(scroll_area)
 
-        threading.Thread(target=_run, daemon=True).start()
+    content = QWidget()
+    scroll_area.setWidget(content)
+    layout = QVBoxLayout(content)
+    layout.setContentsMargins(14, 14, 14, 14)
+    layout.setSpacing(8)
 
-    def _install_deps_wizard():
-        deps = ["sounddevice", "faster-whisper", "pynput", "pystray", "pillow", "customtkinter"]
+    def _add_label(text, bold=False, color=None):
+        lbl = QLabel(text)
+        if bold:
+            lbl.setStyleSheet("font-weight: bold; font-size: 14px;")
+        if color:
+            lbl.setStyleSheet(lbl.styleSheet() + f" color: {color};")
+        lbl.setWordWrap(True)
+        layout.addWidget(lbl)
+        return lbl
 
-        def _run():
-            try:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", *deps])
-                messagebox.showinfo("Done", "Dependencies installed.")
-            except Exception as exc:
-                messagebox.showerror("Install Error", str(exc))
+    def _add_row(*widgets):
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        for w in widgets:
+            row_layout.addWidget(w)
+        row_layout.addStretch()
+        layout.addWidget(row)
+        return row
 
-        threading.Thread(target=_run, daemon=True).start()
+    # --- Header ---
+    _add_label("Welcome to VERA!", bold=True)
+    _add_label("Speech model: auto-downloads on first use (~150MB)", color="#888888")
+
+    # --- Language ---
+    lang_label = QLabel("Language")
+    lang_combo = QComboBox()
+    lang_combo.addItems(LANG_CHOICES)
+    current_lang = state["language"].get()
+    if current_lang in LANG_CHOICES:
+        lang_combo.setCurrentText(current_lang)
+    _add_row(lang_label, lang_combo)
+
+    # --- Mode ---
+    _add_label("Mode", bold=True)
+    mode_group = QButtonGroup(dialog)
+    mode_row = QWidget()
+    mode_row_layout = QHBoxLayout(mode_row)
+    mode_row_layout.setContentsMargins(0, 0, 0, 0)
+    radio_mic = QRadioButton("Timed mic")
+    radio_hold = QRadioButton("Hold-to-talk")
+    radio_hotkey = QRadioButton("Hotkey")
+    mode_group.addButton(radio_mic)
+    mode_group.addButton(radio_hold)
+    mode_group.addButton(radio_hotkey)
+    mode_row_layout.addWidget(radio_mic)
+    mode_row_layout.addWidget(radio_hold)
+    mode_row_layout.addWidget(radio_hotkey)
+    mode_row_layout.addStretch()
+    layout.addWidget(mode_row)
+
+    current_mode = state["mode"].get()
+    if current_mode == "mic":
+        radio_mic.setChecked(True)
+    elif current_mode == "hotkey":
+        radio_hotkey.setChecked(True)
+    else:
+        radio_hold.setChecked(True)
+
+    # --- Seconds ---
+    sec_label = QLabel("Seconds (timed/hotkey)")
+    sec_label.setFixedWidth(160)
+    sec_entry = QLineEdit(state["seconds"].get())
+    sec_entry.setFixedWidth(80)
+    _add_row(sec_label, sec_entry)
+
+    # --- Hotkey ---
+    hk_label = QLabel("Hotkey")
+    hk_label.setFixedWidth(160)
+    hk_entry = QLineEdit(state["hotkey"].get())
+    hk_entry.setFixedWidth(160)
+    hk_btn = QPushButton("Record")
+
+    def _do_record_hotkey():
+        _record_hotkey(state["hotkey"])
+        hk_entry.setText(state["hotkey"].get())
+
+    hk_btn.clicked.connect(_do_record_hotkey)
+    _add_row(hk_label, hk_entry, hk_btn)
+
+    # --- Hold key ---
+    hold_label = QLabel("Hold key")
+    hold_label.setFixedWidth(160)
+    hold_entry = QLineEdit(state["holdkey"].get())
+    hold_entry.setFixedWidth(160)
+    hold_btn = QPushButton("Record")
+
+    def _do_record_hold():
+        _record_hold_key(state["holdkey"])
+        hold_entry.setText(state["holdkey"].get())
+
+    hold_btn.clicked.connect(_do_record_hold)
+    _add_row(hold_label, hold_entry, hold_btn)
+
+    # --- Spotify ---
+    spotify_chk = QCheckBox("Enable Spotify media controls")
+    spotify_chk.setChecked(bool(state["spotify_media"].get()))
+    layout.addWidget(spotify_chk)
+
+    spotify_req_chk = QCheckBox("Require word 'spotify' in command")
+    spotify_req_chk.setChecked(bool(state["spotify_requires"].get()))
+    layout.addWidget(spotify_req_chk)
+
+    # --- Model info ---
+    _add_label(
+        "VERA uses Whisper for speech recognition. The model (~150MB) will download automatically\n"
+        "the first time you speak — no manual setup needed.",
+        color="#888888",
+    )
+
+    # --- Buttons row ---
+    btn_row = QWidget()
+    btn_layout = QHBoxLayout(btn_row)
+    btn_layout.setContentsMargins(0, 0, 0, 0)
+    import_btn = QPushButton("Import Steam Apps")
+    install_btn = QPushButton("Install Dependencies")
+    import_btn.clicked.connect(lambda: _import_steam())
+    install_btn.clicked.connect(lambda: _install_deps_wizard(dialog))
+    btn_layout.addWidget(import_btn)
+    btn_layout.addWidget(install_btn)
+    btn_layout.addStretch()
+    layout.addWidget(btn_row)
+
+    # --- Download progress (hidden until download starts) ---
+    dl_frame = QWidget()
+    dl_layout = QVBoxLayout(dl_frame)
+    dl_layout.setContentsMargins(0, 4, 0, 0)
+    dl_status_label = QLabel("")
+    dl_progress = QProgressBar()
+    dl_progress.setRange(0, 1000)
+    dl_progress.setValue(0)
+    dl_layout.addWidget(dl_status_label)
+    dl_layout.addWidget(dl_progress)
+    dl_frame.setVisible(False)
+    layout.addWidget(dl_frame)
+
+    # --- Shortcut checkbox ---
+    shortcut_chk = QCheckBox("Create desktop shortcut")
+    shortcut_chk.setChecked(True)
+    layout.addWidget(shortcut_chk)
+
+    # --- Finish button ---
+    finish_btn = QPushButton("Finish Setup")
+    finish_btn.setFixedHeight(40)
+    finish_btn.setStyleSheet("font-size: 14px; font-weight: bold;")
+    layout.addWidget(finish_btn)
 
     def _finish():
+        # Write entries back into state vars before building config
+        state["seconds"].set(sec_entry.text())
+        state["hotkey"].set(hk_entry.text())
+        state["holdkey"].set(hold_entry.text())
+        state["language"].set(lang_combo.currentText())
+        if radio_mic.isChecked():
+            state["mode"].set("mic")
+        elif radio_hotkey.isChecked():
+            state["mode"].set("hotkey")
+        else:
+            state["mode"].set("hold")
+        state["spotify_media"].set(spotify_chk.isChecked())
+        state["spotify_requires"].set(spotify_req_chk.isChecked())
+
         data = _build_config(wizard_done=True)
         _save_config(data)
-        if create_shortcut_var.get():
+        if shortcut_chk.isChecked():
             _create_shortcut()
-        wizard.destroy()
+        dialog.accept()
         _start_background()
-        messagebox.showinfo("Done", "Setup complete. VERA is ready.")
+        QMessageBox.information(None, "Done", "Setup complete. VERA is ready.")
 
-    # Header
-    ctk.CTkLabel(scroll, text="Welcome to VERA!", font=("Segoe UI", 16, "bold")).pack(
-        anchor="w", padx=10, pady=(6, 4)
-    )
-    ctk.CTkLabel(scroll, text="Speech model: auto-downloads on first use (~150MB)", text_color="gray").pack(anchor="w", padx=10, pady=(0, 8))
+    finish_btn.clicked.connect(_finish)
 
-    # Language
-    lang_row = ctk.CTkFrame(scroll, fg_color="transparent")
-    lang_row.pack(fill="x", padx=10, pady=4)
-    ctk.CTkLabel(lang_row, text="Language", width=120).pack(side="left")
-    ctk.CTkOptionMenu(lang_row, variable=language, values=LANG_CHOICES, width=200).pack(side="left")
+    dialog.exec()
 
-    # Mode
-    ctk.CTkLabel(scroll, text="Mode", font=("Segoe UI", 13, "bold")).pack(
-        anchor="w", padx=10, pady=(10, 4)
-    )
-    mode_row = ctk.CTkFrame(scroll, fg_color="transparent")
-    mode_row.pack(fill="x", padx=10, pady=4)
-    ctk.CTkRadioButton(mode_row, text="Timed mic", variable=mode, value="mic").pack(side="left", padx=(0, 12))
-    ctk.CTkRadioButton(mode_row, text="Hold-to-talk", variable=mode, value="hold").pack(side="left", padx=(0, 12))
-    ctk.CTkRadioButton(mode_row, text="Hotkey", variable=mode, value="hotkey").pack(side="left")
 
-    # Timing + keys
-    row1 = ctk.CTkFrame(scroll, fg_color="transparent")
-    row1.pack(fill="x", padx=10, pady=4)
-    ctk.CTkLabel(row1, text="Seconds (timed/hotkey)", width=160).pack(side="left")
-    ctk.CTkEntry(row1, textvariable=seconds, width=80).pack(side="left", padx=(0, 16))
+def _install_deps_wizard(parent):
+    deps = ["sounddevice", "faster-whisper", "pynput", "pystray", "pillow", "PySide6"]
 
-    row2 = ctk.CTkFrame(scroll, fg_color="transparent")
-    row2.pack(fill="x", padx=10, pady=4)
-    ctk.CTkLabel(row2, text="Hotkey", width=160).pack(side="left")
-    ctk.CTkEntry(row2, textvariable=hotkey, width=160).pack(side="left", padx=(0, 10))
-    ctk.CTkButton(row2, text="Record", command=lambda: _record_hotkey(hotkey), width=90).pack(side="left")
+    def _run():
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", *deps])
+            QTimer.singleShot(0, lambda: QMessageBox.information(parent, "Done", "Dependencies installed."))
+        except Exception as exc:
+            QTimer.singleShot(0, lambda: QMessageBox.critical(parent, "Install Error", str(exc)))
 
-    row3 = ctk.CTkFrame(scroll, fg_color="transparent")
-    row3.pack(fill="x", padx=10, pady=4)
-    ctk.CTkLabel(row3, text="Hold key", width=160).pack(side="left")
-    ctk.CTkEntry(row3, textvariable=holdkey, width=160).pack(side="left", padx=(0, 10))
-    ctk.CTkButton(row3, text="Record", command=lambda: _record_hold_key(holdkey), width=90).pack(side="left")
-
-    # Spotify
-    ctk.CTkCheckBox(scroll, text="Enable Spotify media controls", variable=spotify_media).pack(
-        anchor="w", padx=16, pady=(10, 2)
-    )
-    ctk.CTkCheckBox(scroll, text="Require word 'spotify' in command", variable=spotify_requires).pack(
-        anchor="w", padx=16, pady=2
-    )
-
-    # Speech model info
-    ctk.CTkLabel(
-        scroll,
-        text="VERA uses Whisper for speech recognition. The model (~150MB) will download automatically\nthe first time you speak — no manual setup needed.",
-        text_color="gray",
-        justify="left",
-    ).pack(anchor="w", padx=10, pady=(4, 8))
-
-    btn_frame2 = ctk.CTkFrame(scroll, fg_color="transparent")
-    btn_frame2.pack(fill="x", padx=10, pady=(0, 4))
-    ctk.CTkButton(btn_frame2, text="Import Steam Apps", command=_import_steam).pack(
-        side="left", padx=6, pady=8
-    )
-    ctk.CTkButton(btn_frame2, text="Install Dependencies", command=_install_deps_wizard).pack(
-        side="left", padx=6, pady=8
-    )
-
-    ctk.CTkCheckBox(scroll, text="Create desktop shortcut", variable=create_shortcut_var).pack(
-        anchor="w", padx=16, pady=(10, 2)
-    )
-
-    ctk.CTkButton(
-        scroll,
-        text="Finish Setup",
-        command=_finish,
-        height=40,
-        font=("Segoe UI", 14, "bold"),
-    ).pack(padx=10, pady=16, fill="x")
+    threading.Thread(target=_run, daemon=True).start()

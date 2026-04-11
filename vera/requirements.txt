@@ -4,7 +4,7 @@ faster-whisper
 pynput
 pystray
 pillow
-customtkinter
+PySide6
 pyttsx3
 pycaw
 kokoro-onnx
