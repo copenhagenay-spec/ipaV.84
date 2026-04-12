@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QFileDialog,
 )
-from PySide6.QtCore import Qt, QTimer, QObject, Signal
+from PySide6.QtCore import Qt, QTimer, QObject, Signal, QEvent
 from PySide6.QtGui import QIcon, QCloseEvent
 
 import ui
@@ -134,6 +134,9 @@ class BackgroundListener:
         self.recording_flag = threading.Event()
 
     def stop(self):
+        self.stop_event.set()
+        if hasattr(self, "_poll_stop"):
+            self._poll_stop.set()
         if self.listener is not None:
             try:
                 self.listener.stop()
@@ -208,7 +211,70 @@ class BackgroundListener:
                 self.recording_flag.clear()
                 self.stop_event.clear()
 
-        if _is_mouse_button(hold_key):
+        if _is_joy_button(hold_key):
+            parsed = _parse_joy_button(hold_key)
+            if not parsed:
+                raise ValueError("Invalid joystick button spec")
+            joy_id, btn_idx = parsed
+
+            import ctypes as _ctypes
+
+            class _JOYINFOEX(_ctypes.Structure):
+                _fields_ = [
+                    ("dwSize", _ctypes.c_uint32),
+                    ("dwFlags", _ctypes.c_uint32),
+                    ("dwXpos", _ctypes.c_uint32),
+                    ("dwYpos", _ctypes.c_uint32),
+                    ("dwZpos", _ctypes.c_uint32),
+                    ("dwRpos", _ctypes.c_uint32),
+                    ("dwUpos", _ctypes.c_uint32),
+                    ("dwVpos", _ctypes.c_uint32),
+                    ("dwButtons", _ctypes.c_uint32),
+                    ("dwButtonNumber", _ctypes.c_uint32),
+                    ("dwPOV", _ctypes.c_uint32),
+                    ("dwReserved1", _ctypes.c_uint32),
+                    ("dwReserved2", _ctypes.c_uint32),
+                ]
+
+            _winmm = _ctypes.windll.winmm
+            _JOY_RETURNALL = 0x00FF
+            _btn_mask = 1 << btn_idx
+            _joy_released = {"done": False}
+            _poll_stop = threading.Event()
+
+            def _joy_poll():
+                prev_pressed = False
+                while not _poll_stop.is_set():
+                    info = _JOYINFOEX()
+                    info.dwSize = _ctypes.sizeof(_JOYINFOEX)
+                    info.dwFlags = _JOY_RETURNALL
+                    if _winmm.joyGetPosEx(joy_id, _ctypes.byref(info)) == 0:
+                        pressed = bool(info.dwButtons & _btn_mask)
+                        if pressed and not prev_pressed:
+                            if not self.recording_flag.is_set():
+                                _joy_released["done"] = False
+                                self.recording_flag.set()
+                                self.stop_event.clear()
+                                threading.Thread(target=_record, daemon=True).start()
+                                self._play_ptt_beep(660)
+                        elif not pressed and prev_pressed:
+                            if self.recording_flag.is_set() and not _joy_released["done"]:
+                                _joy_released["done"] = True
+                                self._play_ptt_beep(440)
+                                self.stop_event.set()
+                        prev_pressed = pressed
+                    import time as _t
+                    _t.sleep(0.01)
+
+            self.stop()
+            self.mode = "hold"
+            self._poll_stop = _poll_stop
+            _poll_thread = threading.Thread(target=_joy_poll, daemon=True)
+            _poll_thread.start()
+            # store poll thread so stop() can join it
+            self.listener = _poll_thread
+
+        elif _is_mouse_button(hold_key):
             from pynput import mouse  # type: ignore
             button_obj = _resolve_mouse_button(hold_key, mouse)
             if not button_obj:
@@ -303,6 +369,20 @@ def _resolve_hold_key(key_name: str, keyboard):
 
 def _is_mouse_button(key_name: str) -> bool:
     return _normalize_record_key_name(key_name) in ("x1", "x2")
+
+
+def _is_joy_button(key_name: str) -> bool:
+    """Returns True if key_name is a joystick button spec like 'joy:0:2'."""
+    return str(key_name).strip().startswith("joy:")
+
+
+def _parse_joy_button(key_name: str):
+    """Parse 'joy:0:2' → (joy_id=0, button=2). Returns None on failure."""
+    try:
+        parts = str(key_name).strip().split(":")
+        return int(parts[1]), int(parts[2])
+    except Exception:
+        return None
 
 
 def _resolve_mouse_button(key_name: str, mouse):
@@ -495,7 +575,6 @@ def main() -> None:
                 event.ignore()
 
         def changeEvent(self, event):
-            from PySide6.QtCore import QEvent
             super().changeEvent(event)
             if event.type() == QEvent.WindowStateChange and self.isMinimized():
                 if tray_ready["ok"]:
@@ -527,6 +606,7 @@ def main() -> None:
         value=cfg.get("search_engine", "https://www.google.com/search?q={query}")
     )
     ptt_beep_volume = SimpleVar(value=int(cfg.get("ptt_beep_volume", 80)))
+    font_scale      = SimpleVar(value=cfg.get("font_scale", "Normal"))
 
     # TTS output device — get available output device names for dropdown
     import sounddevice as _sd
@@ -544,6 +624,7 @@ def main() -> None:
     overlay_position = SimpleVar(value=cfg.get("overlay_position", "Top Left"))
     overlay_hotkey = SimpleVar(value=cfg.get("overlay_hotkey", ""))
     overlay_hotkey_display = SimpleVar(value=_format_record_key_name(cfg.get("overlay_hotkey", "")))
+    joy_ptt_button = SimpleVar(value=cfg.get("joy_ptt_button", ""))
     bug_report_secret_var = SimpleVar(value=cfg.get("bug_report_secret", "") or "Z3JlZW5pc2RheQ==")
     premium = SimpleVar(value=bool(cfg.get("premium", False)))
     confirm_actions = SimpleVar(value=bool(cfg.get("confirm_actions", False)))
@@ -676,6 +757,7 @@ def main() -> None:
     discord_servers_textbox = None
     keybinds_textbox = None
     listener = BackgroundListener()
+    joy_listener = BackgroundListener()
     tray_icon = {"icon": None}
     tray_ready = {"ok": False}
     _model_preload_started = {"done": False}
@@ -736,6 +818,8 @@ def main() -> None:
             "personality_mode": personality_mode.get(),
             "overlay_position": overlay_position.get(),
             "overlay_hotkey": overlay_hotkey.get(),
+            "joy_ptt_button": joy_ptt_button.get(),
+            "font_scale": font_scale.get(),
             "premium": bool(premium.get()),
             "confirm_actions": bool(confirm_actions.get()),
             "spotify_media": bool(spotify_media.get()),
@@ -1123,6 +1207,125 @@ def main() -> None:
         _record_hotkey(overlay_hotkey, on_done=lambda: overlay_hotkey_display.set(
             _format_record_key_name(overlay_hotkey.get())
         ))
+
+    def _record_secondary_ptt(target_var: SimpleVar, on_done=None) -> None:
+        """Record any key, mouse button, or joystick button as the secondary PTT."""
+        import ctypes as _ctypes
+
+        try:
+            from pynput import keyboard as _kb
+            from pynput import mouse as _ms
+        except Exception:
+            _notify_error("Missing Dependency", "pynput is required to record keys.")
+            return
+
+        dialog, status = _create_record_popup(
+            "Record Secondary PTT",
+            "Press any key, mouse button, or joystick button...",
+        )
+
+        _done = {"value": False}
+        active = {"kb": None, "ms": None}
+
+        modifier_keys = {
+            _kb.Key.ctrl, _kb.Key.ctrl_l, _kb.Key.ctrl_r,
+            _kb.Key.alt, _kb.Key.alt_l, _kb.Key.alt_r,
+            _kb.Key.shift, _kb.Key.shift_l, _kb.Key.shift_r,
+            _kb.Key.cmd, _kb.Key.cmd_l, _kb.Key.cmd_r,
+        }
+
+        def _key_name(key):
+            if isinstance(key, _kb.KeyCode) and key.char:
+                return key.char.lower()
+            if key == _kb.Key.space:
+                return "space"
+            name = getattr(key, "name", None)
+            return name.lower() if name else None
+
+        def _finish(spec: str, label: str):
+            if _done["value"]:
+                return
+            _done["value"] = True
+            try:
+                if active["kb"]:
+                    active["kb"].stop()
+                if active["ms"]:
+                    active["ms"].stop()
+            except Exception:
+                pass
+            target_var.set(spec)
+            status.set(f"Captured: {label}")
+            if on_done:
+                _bridge.post(lambda: on_done())
+            dialog.after(400, dialog.destroy)
+
+        def _on_press(key):
+            if _done["value"]:
+                return False
+            if key == _kb.Key.esc:
+                _done["value"] = True
+                dialog.after(0, dialog.destroy)
+                return False
+            if key in modifier_keys:
+                return
+            name = _key_name(key)
+            if name:
+                _bridge.post(lambda n=name: _finish(n, n))
+            return False
+
+        def _on_click(_, __, button, pressed):
+            if not pressed or _done["value"]:
+                return
+            if button == _ms.Button.x1:
+                _bridge.post(lambda: _finish("x1", "Mouse Back (x1)"))
+                return False
+            elif button == _ms.Button.x2:
+                _bridge.post(lambda: _finish("x2", "Mouse Fwd (x2)"))
+                return False
+
+        class _JOYINFOEX(_ctypes.Structure):
+            _fields_ = [
+                ("dwSize", _ctypes.c_uint32), ("dwFlags", _ctypes.c_uint32),
+                ("dwXpos", _ctypes.c_uint32), ("dwYpos", _ctypes.c_uint32),
+                ("dwZpos", _ctypes.c_uint32), ("dwRpos", _ctypes.c_uint32),
+                ("dwUpos", _ctypes.c_uint32), ("dwVpos", _ctypes.c_uint32),
+                ("dwButtons", _ctypes.c_uint32), ("dwButtonNumber", _ctypes.c_uint32),
+                ("dwPOV", _ctypes.c_uint32), ("dwReserved1", _ctypes.c_uint32),
+                ("dwReserved2", _ctypes.c_uint32),
+            ]
+
+        _winmm = _ctypes.windll.winmm
+        _JOY_RETURNALL = 0x00FF
+
+        def _joy_poll():
+            import time as _t
+            deadline = _t.time() + 10
+            while _t.time() < deadline and not _done["value"]:
+                for joy_id in range(4):
+                    info = _JOYINFOEX()
+                    info.dwSize = _ctypes.sizeof(_JOYINFOEX)
+                    info.dwFlags = _JOY_RETURNALL
+                    if _winmm.joyGetPosEx(joy_id, _ctypes.byref(info)) == 0:
+                        buttons = info.dwButtons
+                        if buttons:
+                            for bit in range(16):
+                                if buttons & (1 << bit):
+                                    spec = f"joy:{joy_id}:{bit}"
+                                    label = f"Joy {joy_id} Btn {bit + 1}"
+                                    _bridge.post(lambda s=spec, l=label: _finish(s, l))
+                                    return
+                _t.sleep(0.01)
+            if not _done["value"]:
+                _done["value"] = True
+                _bridge.post(dialog.destroy)
+
+        active["kb"] = _kb.Listener(on_press=_on_press)
+        _active_recorders.append(active["kb"])
+        active["kb"].start()
+        active["ms"] = _ms.Listener(on_click=_on_click)
+        _active_recorders.append(active["ms"])
+        active["ms"].start()
+        threading.Thread(target=_joy_poll, daemon=True).start()
 
     def _load_logo():
         logo_path = os.path.join(os.path.dirname(__file__), "data", "assets", "ipa_logo.png")
@@ -1787,6 +1990,21 @@ def main() -> None:
                     on_record_start=lambda: (_bridge.post(lambda: status_var.set("Recording...")), _rpc_set("Recording...")),
                     on_record_end=lambda: (_bridge.post(lambda: status_var.set(_hold_label)), _rpc_set("Listening...")),
                 )
+                # Secondary PTT — runs alongside primary PTT if configured (any key, mouse, or joystick)
+                _joy_key = joy_ptt_button.get()
+                if _joy_key:
+                    try:
+                        joy_listener.start_hold(
+                            _joy_key,
+                            model_path=_model_dir(),
+                            confirm_fn=_confirm_prompt,
+                            on_text=lambda t: _bridge.post(lambda _t=t: _update_transcript(_t)),
+                            restart_fn=_do_restart,
+                            on_record_start=lambda: (_bridge.post(lambda: status_var.set("Recording...")), _rpc_set("Recording...")),
+                            on_record_end=lambda: (_bridge.post(lambda: status_var.set(_hold_label)), _rpc_set("Listening...")),
+                        )
+                    except Exception:
+                        pass
                 status_var.set(_hold_label)
                 _rpc_set("Listening...")
             elif mode.get() == "toggle":
@@ -1809,7 +2027,7 @@ def main() -> None:
                 status_var.set("Wake word active (say 'vera')")
             else:
                 _runtime_mode["value"] = "idle"
-                status_var.set("Timed mic mode (manual Run Now)")
+                status_var.set("Idle — no mode selected")
         except Exception as exc:
             _runtime_mode["value"] = "idle"
             status_var.set("Listener failed to start")
@@ -2351,6 +2569,8 @@ def main() -> None:
         "overlay_position": overlay_position,
         "overlay_hotkey": overlay_hotkey,
         "overlay_hotkey_display": overlay_hotkey_display,
+        "joy_ptt_button": joy_ptt_button,
+        "font_scale": font_scale,
         "spotify_media": spotify_media,
         "spotify_requires": spotify_requires,
         "spotify_keywords": spotify_keywords,
@@ -2381,6 +2601,7 @@ def main() -> None:
     callbacks_ui = {
         "load_logo": _load_logo,
         "save": _save,
+        "do_restart": _do_restart,
         "run_now": _run_now,
         "install_deps": _install_deps,
         "start_background": _start_background,
@@ -2411,15 +2632,38 @@ def main() -> None:
         "remove_keybind": _remove_keybind,
         "record_keybind_key": _record_keybind_step,
         "record_overlay_hotkey": _record_overlay_hotkey,
+        "record_secondary_ptt": _record_secondary_ptt,
     }
 
     constants = {
         "HOTKEY_CHOICES": HOTKEY_CHOICES,
         "LANG_CHOICES": LANG_CHOICES,
         "install_path": os.path.dirname(os.path.abspath(__file__)),
+        "FONT_SCALE_CHOICES": ui.FONT_SCALE_CHOICES,
     }
 
     widgets = ui.build_ui(window=root, state=state, callbacks=callbacks_ui, constants=constants)
+
+    # Ctrl+Scroll to adjust text size
+    _font_scale_index = [0]  # 0=Normal, 1=Large, 2=X-Large
+    _font_scale_names = ui.FONT_SCALE_CHOICES
+
+    class _CtrlScrollFilter(QObject):
+        def eventFilter(self, _, event):
+            if event.type() == QEvent.Wheel:
+                if event.modifiers() & Qt.ControlModifier:
+                    delta = event.angleDelta().y()
+                    if delta > 0:
+                        _font_scale_index[0] = min(_font_scale_index[0] + 1, len(_font_scale_names) - 1)
+                    elif delta < 0:
+                        _font_scale_index[0] = max(_font_scale_index[0] - 1, 0)
+                    ui.apply_label_scale(_font_scale_names[_font_scale_index[0]])
+                    return True
+            return False
+
+    _scroll_filter = _CtrlScrollFilter(app)
+    app.installEventFilter(_scroll_filter)
+
     apps_textbox = widgets.get("apps_textbox")
     aliases_textbox = widgets.get("aliases_textbox")
     actions_textbox = widgets.get("actions_textbox")
@@ -2448,7 +2692,6 @@ def main() -> None:
     if save_button is not None:
         class _SaveHoverFilter(QObject):
             def eventFilter(self, obj, event):
-                from PySide6.QtCore import QEvent
                 if obj is save_button:
                     if event.type() == QEvent.Enter:
                         save_button.setText("Save changes")

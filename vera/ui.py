@@ -25,6 +25,35 @@ _TEXT     = "#ffffff"
 _MUTED    = "#888888"
 _WARN_FG  = "#ffaa00"
 
+# ---------------------------------------------------------------------------
+# Text scale registry
+# ---------------------------------------------------------------------------
+
+FONT_SCALE_CHOICES = ["Normal", "Large", "X-Large"]
+_FONT_SCALE_MAP    = {"Normal": 1.0, "Large": 1.25, "X-Large": 1.5}
+
+# Each entry: (QLabel, base_px, bold)
+_scalable_labels: list = []
+
+
+def _make_scalable_font(px: int, bold: bool = False) -> QFont:
+    f = QFont("Segoe UI")
+    f.setPixelSize(px)
+    f.setBold(bold)
+    return f
+
+
+def apply_label_scale(scale_name: str) -> None:
+    """Immediately rescale all registered labels and application body font."""
+    factor = _FONT_SCALE_MAP.get(scale_name, 1.0)
+    for label, base_px, bold in _scalable_labels:
+        label.setFont(_make_scalable_font(round(base_px * factor), bold))
+    app = QApplication.instance()
+    if app:
+        body = QFont("Segoe UI")
+        body.setPixelSize(round(12 * factor))
+        app.setFont(body)
+
 _BTN_PRIMARY = f"""
     QPushButton {{
         background-color: {_ACCENT}; color: {_TEXT};
@@ -164,16 +193,67 @@ def _make_listbox(height_rows=6) -> QListWidget:
     return lb
 
 
+def _collapsible_list(title: str, height_rows: int = 6):
+    """Returns (container_widget, listbox).
+
+    The list starts collapsed. The header button shows the item count and
+    toggles visibility. The count updates automatically when items are added
+    or removed.
+    """
+    container = QWidget()
+    container.setStyleSheet("background: transparent;")
+    vl = QVBoxLayout(container)
+    vl.setContentsMargins(0, 0, 0, 0)
+    vl.setSpacing(2)
+
+    lb = _make_listbox(height_rows)
+    lb.setVisible(False)
+
+    header = QPushButton(f"\u25b6  {title}  (0)")
+    header.setStyleSheet("""
+        QPushButton {
+            background: transparent;
+            color: #ffffff;
+            font-size: 14px; font-weight: bold;
+            text-align: left;
+            border: none;
+            padding: 4px 0px;
+            margin-top: 4px;
+        }
+        QPushButton:hover { color: #cccccc; }
+    """)
+
+    def _refresh():
+        arrow = "\u25bc" if lb.isVisible() else "\u25b6"
+        header.setText(f"{arrow}  {title}  ({lb.count()})")
+
+    def _toggle():
+        lb.setVisible(not lb.isVisible())
+        _refresh()
+
+    header.clicked.connect(_toggle)
+    lb.model().rowsInserted.connect(lambda *_: _refresh())
+    lb.model().rowsRemoved.connect(lambda *_: _refresh())
+
+    vl.addWidget(header)
+    vl.addWidget(lb)
+    return container, lb
+
+
 def _section_label(text, help_text=None) -> tuple:
     spacer = QWidget()
     spacer.setFixedHeight(6)
     lbl = QLabel(text)
-    lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #ffffff; margin-top: 4px;")
+    lbl.setStyleSheet("font-weight: bold; color: #ffffff; margin-top: 4px;")
+    lbl.setFont(_make_scalable_font(14, bold=True))
+    _scalable_labels.append((lbl, 14, True))
     widgets = [spacer, lbl]
     if help_text:
         h = QLabel(help_text)
-        h.setStyleSheet(f"color: {_MUTED}; font-size: 11px;")
+        h.setStyleSheet(f"color: {_MUTED};")
+        h.setFont(_make_scalable_font(11))
         h.setWordWrap(True)
+        _scalable_labels.append((h, 11, False))
         widgets.append(h)
     return widgets
 
@@ -241,14 +321,16 @@ class _OverlayWidget(QWidget):
 # ---------------------------------------------------------------------------
 
 def build_ui(window, state: dict, callbacks: dict, constants: dict):
-    HOTKEY_CHOICES = constants["HOTKEY_CHOICES"]
-    LANG_CHOICES   = constants["LANG_CHOICES"]
-    _install_path  = constants.get("install_path", "")
+    _scalable_labels.clear()
+
+    HOTKEY_CHOICES      = constants["HOTKEY_CHOICES"]
+    LANG_CHOICES        = constants["LANG_CHOICES"]
+    FONT_SCALE_CHOICES  = constants.get("FONT_SCALE_CHOICES", ["Normal", "Large", "X-Large"])
+    _install_path       = constants.get("install_path", "")
 
     # -- Unpack state --
     mode            = state["mode"]
     language        = state["language"]
-    seconds         = state["seconds"]
     hotkey          = state["hotkey"]
     holdkey         = state["holdkey"]
     hotkey_display  = state["hotkey_display"]
@@ -264,6 +346,8 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     overlay_position = state["overlay_position"]
     overlay_hotkey   = state["overlay_hotkey"]
     overlay_hotkey_display = state["overlay_hotkey_display"]
+    joy_ptt_button  = state["joy_ptt_button"]
+    font_scale      = state["font_scale"]
     spotify_media   = state["spotify_media"]
     spotify_requires = state["spotify_requires"]
     spotify_keywords = state["spotify_keywords"]
@@ -294,6 +378,7 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     # -- Unpack callbacks --
     _load_logo           = callbacks["load_logo"]
     _save                = callbacks["save"]
+    _do_restart          = callbacks.get("do_restart")
     _run_now             = callbacks["run_now"]
     _install_deps        = callbacks["install_deps"]
     _start_background    = callbacks["start_background"]
@@ -512,20 +597,14 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     rec_vl.setContentsMargins(12, 8, 12, 8)
     rec_vl.setSpacing(6)
 
-    # Seconds + Language row
-    sec_lbl = QLabel("Seconds")
-    sec_lbl.setFixedWidth(120)
-    sec_lbl.setStyleSheet(f"color: {_TEXT};")
-    sec_edit = _make_entry(80)
-    sec_edit.setText(seconds.get())
-    sec_edit.textChanged.connect(seconds.set)
+    # Language row
     lang_lbl = QLabel("Language")
-    lang_lbl.setFixedWidth(80)
+    lang_lbl.setFixedWidth(120)
     lang_lbl.setStyleSheet(f"color: {_TEXT};")
     lang_combo = _make_combo(LANG_CHOICES, 140)
     lang_combo.setCurrentText(language.get())
     lang_combo.currentTextChanged.connect(language.set)
-    rec_vl.addWidget(_hrow(sec_lbl, sec_edit, lang_lbl, lang_combo))
+    rec_vl.addWidget(_hrow(lang_lbl, lang_combo))
 
     # Hotkey row
     hk_lbl = QLabel("Toggle key")
@@ -562,6 +641,26 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
 
     hold_rec_btn = _secondary_btn("Record", _hold_record)
     rec_vl.addWidget(_hrow(hold_lbl, hold_edit, hold_rec_btn))
+
+    # Secondary PTT row
+    _record_secondary_ptt_fn = callbacks.get("record_secondary_ptt")
+    joy_ptt_edit = _make_entry(160)
+    joy_ptt_edit.setReadOnly(True)
+    joy_ptt_edit.setPlaceholderText("None")
+    joy_ptt_edit.setText(joy_ptt_button.get())
+    joy_ptt_button.trace_add("write", lambda *_: joy_ptt_edit.setText(joy_ptt_button.get()))
+
+    def _do_record_secondary():
+        if _record_secondary_ptt_fn:
+            _record_secondary_ptt_fn(
+                joy_ptt_button,
+                on_done=lambda: (_save(), _do_restart()),
+            )
+
+    joy_ptt_btn = _secondary_btn("Record", _do_record_secondary)
+    joy_ptt_row = _hrow(QLabel("Secondary PTT"), joy_ptt_edit, joy_ptt_btn)
+    joy_ptt_row.findChildren(QLabel)[0].setStyleSheet(f"color: {_TEXT}; min-width: 120px;")
+    rec_vl.addWidget(joy_ptt_row)
 
     # Search engine row
     se_lbl = QLabel("Search Engine")
@@ -800,10 +899,13 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     apps_area, _, apps_vl = _scrollable_tab()
     tabs.addTab(apps_area, "Apps")
 
-    for w in _section_label("Registered Apps", "Say 'open <app name>' to launch an app."):
-        apps_vl.addWidget(w)
-    apps_textbox = _make_listbox(6)
-    apps_vl.addWidget(apps_textbox)
+    _ra_spacer = QWidget(); _ra_spacer.setFixedHeight(6)
+    apps_vl.addWidget(_ra_spacer)
+    _ra_help = QLabel("Say 'open <app name>' to launch an app.")
+    _ra_help.setStyleSheet(f"color: {_MUTED}; font-size: 11px;")
+    apps_vl.addWidget(_ra_help)
+    _ra_container, apps_textbox = _collapsible_list("Registered Apps", 6)
+    apps_vl.addWidget(_ra_container)
 
     app_card = _card_frame()
     app_cvl = QVBoxLayout(app_card)
@@ -826,10 +928,13 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
         _danger_btn("Remove Selected", _remove_app),
     ))
 
-    for w in _section_label("App Aliases", "Create shortcuts — say the alias to launch the target app."):
-        apps_vl.addWidget(w)
-    aliases_textbox = _make_listbox(4)
-    apps_vl.addWidget(aliases_textbox)
+    _aa_spacer = QWidget(); _aa_spacer.setFixedHeight(6)
+    apps_vl.addWidget(_aa_spacer)
+    _aa_help = QLabel("Create shortcuts — say the alias to launch the target app.")
+    _aa_help.setStyleSheet(f"color: {_MUTED}; font-size: 11px;")
+    apps_vl.addWidget(_aa_help)
+    _aa_container, aliases_textbox = _collapsible_list("App Aliases", 4)
+    apps_vl.addWidget(_aa_container)
 
     alias_card = _card_frame()
     alias_cvl = QVBoxLayout(alias_card)
@@ -870,10 +975,14 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     ai_cvl.addWidget(_hrow(ai_lbl, ai_edit))
     integ_vl.addWidget(ai_card)
 
-    for w in _section_label("Voice Actions", "Map a spoken phrase to a shell command.\nExample: `lock my computer` -> `rundll32.exe user32.dll,LockWorkStation`"):
-        integ_vl.addWidget(w)
-    actions_textbox = _make_listbox(6)
-    integ_vl.addWidget(actions_textbox)
+    _va_spacer = QWidget(); _va_spacer.setFixedHeight(6)
+    integ_vl.addWidget(_va_spacer)
+    _va_help = QLabel("Map a spoken phrase to a shell command.\nExample: `lock my computer` -> `rundll32.exe user32.dll,LockWorkStation`")
+    _va_help.setStyleSheet(f"color: {_MUTED}; font-size: 11px;")
+    _va_help.setWordWrap(True)
+    integ_vl.addWidget(_va_help)
+    _va_container, actions_textbox = _collapsible_list("Voice Actions", 6)
+    integ_vl.addWidget(_va_container)
 
     act_card = _card_frame()
     act_cvl = QVBoxLayout(act_card)
@@ -894,14 +1003,17 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
         _danger_btn("Remove Selected", _remove_action),
     ))
 
-    for w in _section_label("Key Binds", "Say a phrase to press a key (e.g. 'reload' → r)."):
-        integ_vl.addWidget(w)
+    _kb_spacer = QWidget(); _kb_spacer.setFixedHeight(6)
+    integ_vl.addWidget(_kb_spacer)
+    _kb_help = QLabel("Say a phrase to press a key (e.g. 'reload' → r).")
+    _kb_help.setStyleSheet(f"color: {_MUTED}; font-size: 11px;")
+    integ_vl.addWidget(_kb_help)
     warn_lbl = QLabel("⚠ Do not use in games protected by EAC or BattlEye — synthetic input may be flagged.")
     warn_lbl.setStyleSheet(f"color: {_WARN_FG}; font-size: 11px;")
     warn_lbl.setWordWrap(True)
     integ_vl.addWidget(warn_lbl)
-    keybinds_textbox = _make_listbox(6)
-    integ_vl.addWidget(keybinds_textbox)
+    _kb_container, keybinds_textbox = _collapsible_list("Key Binds", 6)
+    integ_vl.addWidget(_kb_container)
 
     kb_card = _card_frame()
     kb_cvl = QVBoxLayout(kb_card)

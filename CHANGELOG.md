@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.97.6
+- Added: collapsible list sections — Voice Actions, Key Binds, Registered Apps, and App Aliases now collapse by default with item count shown in header
+- Added: Setup wizard redesign — accent header bar, card layout, blue Finish Setup button
+- Added: Ctrl+Scroll to scale text size across the UI (Normal → Large → X-Large); resets on restart
+- Added: Secondary PTT — record any keyboard key, mouse button, or joystick button as a second push-to-talk alongside your primary hold key; moved to Recording Settings
+- Changed: Input mode labels updated — "Timed mic" → "Wake Word", "Hotkey" → "Push to Toggle" (wizard was out of sync with main UI)
+- Removed: Seconds field from Recording Settings (unused since timed mic mode was replaced)
+
 ## 0.97.5
 - Jarvis personality mode — formal, composed, dry British wit; free tier alongside Professional
 - Game overlay — transparent always-on-top bar showing last 3 You/VERA exchanges; say "show overlay" / "hide overlay" or set a hotkey; position configurable in Settings (Top Left default)
