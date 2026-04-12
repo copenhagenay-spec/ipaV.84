@@ -645,6 +645,16 @@ def main() -> None:
         if isinstance(a, dict)
     ]
 
+    from skills import load_macros as _load_macros
+    macros = _load_macros()
+    if not isinstance(macros, list):
+        macros = []
+    macros = [
+        {"phrase": str(m.get("phrase", "")).strip(), "steps": [str(s) for s in m.get("steps", []) if str(s).strip()]}
+        for m in macros
+        if isinstance(m, dict)
+    ]
+
     apps = []
     apps_cfg = cfg.get("apps", {})
     if isinstance(apps_cfg, dict):
@@ -718,6 +728,9 @@ def main() -> None:
     keybind_phrase_var = SimpleVar()
     keybind_key_var = SimpleVar()
     keybind_count_var = SimpleVar(value="1")
+    macro_phrase_var = SimpleVar()
+    macro_step_var = SimpleVar()
+    _pending_steps: list = []
 
     def _bind_record_key_display(raw_var: SimpleVar, display_var: SimpleVar) -> None:
         _syncing = {"raw": False, "display": False}
@@ -757,6 +770,7 @@ def main() -> None:
     discord_channels_textbox = None
     discord_servers_textbox = None
     keybinds_textbox = None
+    macros_textbox = None
     listener = BackgroundListener()
     joy_listener = BackgroundListener()
     tray_icon = {"icon": None}
@@ -1617,6 +1631,69 @@ def main() -> None:
             actions.pop(idx)
         _refresh_actions()
         _refresh_save_prompt()
+
+    # --- Macro helpers ---
+    def _refresh_macros():
+        if macros_textbox is None:
+            return
+        macros_textbox.clear()
+        for mac in macros:
+            phrase = mac.get("phrase", "")
+            steps = mac.get("steps", [])
+            macros_textbox.addItem(f"{phrase}  ->  [{',  '.join(steps)}]")
+
+    def _add_macro_step():
+        step = macro_step_var.get().strip()
+        if not step:
+            return
+        _pending_steps.append(step)
+        macro_step_var.set("")
+        pending_textbox = widgets.get("macro_pending_textbox")
+        if pending_textbox is not None:
+            pending_textbox.clear()
+            for s in _pending_steps:
+                pending_textbox.addItem(s)
+
+    def _remove_macro_step():
+        pending_textbox = widgets.get("macro_pending_textbox")
+        if pending_textbox is None or not _pending_steps:
+            return
+        row = pending_textbox.currentRow()
+        idx = row if row >= 0 else len(_pending_steps) - 1
+        if 0 <= idx < len(_pending_steps):
+            _pending_steps.pop(idx)
+        pending_textbox.clear()
+        for s in _pending_steps:
+            pending_textbox.addItem(s)
+
+    def _add_macro():
+        phrase = macro_phrase_var.get().strip()
+        if not phrase:
+            _notify_error("Invalid", "Phrase is required.")
+            return
+        if not _pending_steps:
+            _notify_error("Invalid", "Add at least one step.")
+            return
+        macros.append({"phrase": phrase, "steps": list(_pending_steps)})
+        from skills import save_macros as _save_macros
+        _save_macros(macros)
+        macro_phrase_var.set("")
+        _pending_steps.clear()
+        pending_textbox = widgets.get("macro_pending_textbox")
+        if pending_textbox is not None:
+            pending_textbox.clear()
+        _refresh_macros()
+
+    def _remove_macro():
+        if not macros or macros_textbox is None:
+            return
+        row = macros_textbox.currentRow()
+        idx = row if row >= 0 else len(macros) - 1
+        if 0 <= idx < len(macros):
+            macros.pop(idx)
+        from skills import save_macros as _save_macros
+        _save_macros(macros)
+        _refresh_macros()
 
     # --- Apps list helpers ---
     def _refresh_apps():
@@ -2599,6 +2676,8 @@ def main() -> None:
         "keybind_phrase_var": keybind_phrase_var,
         "keybind_key_var": keybind_key_var,
         "keybind_count_var": keybind_count_var,
+        "macro_phrase_var": macro_phrase_var,
+        "macro_step_var": macro_step_var,
     }
 
     callbacks_ui = {
@@ -2636,6 +2715,10 @@ def main() -> None:
         "record_keybind_key": _record_keybind_step,
         "record_overlay_hotkey": _record_overlay_hotkey,
         "record_secondary_ptt": _record_secondary_ptt,
+        "add_macro_step": _add_macro_step,
+        "remove_macro_step": _remove_macro_step,
+        "add_macro": _add_macro,
+        "remove_macro": _remove_macro,
     }
 
     constants = {
@@ -2674,6 +2757,7 @@ def main() -> None:
     discord_channels_textbox = widgets.get("discord_channels_textbox")
     discord_servers_textbox = widgets.get("discord_servers_textbox")
     keybinds_textbox = widgets.get("keybinds_textbox")
+    macros_textbox   = widgets.get("macros_textbox")
     save_button = widgets.get("save_button")
     notice_frame = widgets.get("notice_frame")
     notice_label = widgets.get("notice_label")
@@ -2781,6 +2865,7 @@ def main() -> None:
     _refresh_discord_channels()
     _refresh_discord_servers()
     _refresh_keybinds()
+    _refresh_macros()
     _saved_config_signature[0] = _config_signature()
     for _var in (
         mode,

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.97.7
+- Added: Command Macros (Premium) — chain multiple commands into one phrase; each step runs in sequence, waiting for VERA to finish speaking before starting the next; configure in Integrations tab
+- Fixed: Ctrl+Scroll text scaling now works on all tabs — collapsible list headers and description labels throughout the UI all scale correctly (moved from 0.97.6.2)
+
 ## 0.97.6.2
 - Fixed: Ctrl+Scroll text scaling now works on all tabs — collapsible list headers (Registered Apps, App Aliases, Voice Actions, Key Binds) and description labels throughout the UI now scale correctly
 

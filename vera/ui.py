@@ -386,6 +386,8 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     keybind_phrase_var   = state["keybind_phrase_var"]
     keybind_key_var      = state["keybind_key_var"]
     keybind_count_var    = state["keybind_count_var"]
+    macro_phrase_var     = state["macro_phrase_var"]
+    macro_step_var       = state["macro_step_var"]
 
     # -- Unpack callbacks --
     _load_logo           = callbacks["load_logo"]
@@ -418,6 +420,10 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     _add_keybind         = callbacks["add_keybind"]
     _remove_keybind      = callbacks["remove_keybind"]
     _record_keybind_key  = callbacks["record_keybind_key"]
+    _add_macro_step      = callbacks["add_macro_step"]
+    _remove_macro_step   = callbacks["remove_macro_step"]
+    _add_macro           = callbacks["add_macro"]
+    _remove_macro        = callbacks["remove_macro"]
     _on_mode_change      = callbacks["mode_changed"]
 
     # =====================================================================
@@ -1060,6 +1066,45 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
         _primary_btn("Add Key Bind", _add_keybind),
         _danger_btn("Remove Selected", _remove_keybind),
     ))
+    # --- Command Macros ---
+    _cm_spacer = QWidget(); _cm_spacer.setFixedHeight(6)
+    integ_vl.addWidget(_cm_spacer)
+    _cm_help = _hint_label("Chain multiple commands into one phrase. Each step runs in sequence with a 1.5s delay. Premium only.")
+    _cm_help.setWordWrap(True)
+    integ_vl.addWidget(_cm_help)
+    _cm_container, macros_textbox = _collapsible_list("Command Macros", 4)
+    integ_vl.addWidget(_cm_container)
+
+    cm_card = _card_frame()
+    cm_cvl = QVBoxLayout(cm_card)
+    cm_cvl.setContentsMargins(12, 8, 12, 8)
+
+    cm_phrase_lbl = QLabel("Phrase")
+    cm_phrase_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 100px;")
+    cm_phrase_edit = _make_entry(260, "e.g. good morning")
+    cm_phrase_edit.textChanged.connect(macro_phrase_var.set)
+    cm_cvl.addWidget(_hrow(cm_phrase_lbl, cm_phrase_edit))
+
+    cm_step_lbl = QLabel("Step")
+    cm_step_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 100px;")
+    cm_step_edit = _make_entry(260, "e.g. open spotify")
+    cm_step_edit.textChanged.connect(macro_step_var.set)
+    cm_step_edit.returnPressed.connect(_add_macro_step)
+    cm_cvl.addWidget(_hrow(cm_step_lbl, cm_step_edit, _secondary_btn("Add Step", _add_macro_step)))
+
+    cm_pending_lbl = QLabel("Steps")
+    cm_pending_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 100px;")
+    macro_pending_textbox = _make_listbox(4)
+    cm_cvl.addWidget(_hrow(cm_pending_lbl, macro_pending_textbox))
+    cm_cvl.addWidget(_hrow(
+        _secondary_btn("Remove Step", _remove_macro_step),
+    ))
+    integ_vl.addWidget(cm_card)
+    integ_vl.addWidget(_hrow(
+        _primary_btn("Add Macro", _add_macro),
+        _danger_btn("Remove Selected", _remove_macro),
+    ))
+
     integ_vl.addStretch()
 
     # =====================================================================
@@ -1476,6 +1521,8 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
         "discord_channels_textbox": discord_channels_textbox,
         "discord_servers_textbox": discord_servers_textbox,
         "keybinds_textbox": keybinds_textbox,
+        "macros_textbox": macros_textbox,
+        "macro_pending_textbox": macro_pending_textbox,
         "tabview": tabs,
         "save_button": save_button,
         "notice_frame": notice_frame,

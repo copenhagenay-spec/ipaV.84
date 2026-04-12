@@ -152,6 +152,13 @@ def _kokoro_tts_play(text: str) -> None:
 
 
 _tts_hooks: list = []  # callables(text) registered externally to observe TTS output
+_tts_idle = threading.Event()
+_tts_idle.set()  # starts in idle state (not speaking)
+
+
+def _wait_for_tts(timeout: float = 30.0) -> None:
+    """Block until TTS is no longer playing (or timeout expires)."""
+    _tts_idle.wait(timeout=timeout)
 
 
 def _tts_speak(text: str, bypass_mute: bool = False) -> bool:
@@ -162,8 +169,14 @@ def _tts_speak(text: str, bypass_mute: bool = False) -> bool:
             _hook(text)
         except Exception:
             pass
+    _tts_idle.clear()  # mark busy before thread starts so callers see it immediately
+    def _speak_and_signal():
+        try:
+            _kokoro_tts_play(text)
+        finally:
+            _tts_idle.set()
     try:
-        threading.Thread(target=_kokoro_tts_play, args=(text,), daemon=True).start()
+        threading.Thread(target=_speak_and_signal, daemon=True).start()
         _log_event(f"TTS_SPEAK: {text}")
         return True
     except Exception as exc:
@@ -1974,6 +1987,24 @@ def _ih_recall_all(m, t, allow_prompt, confirm_fn, restart_fn):
 # ---------------------------------------------------------------------------
 
 _REMINDERS_PATH = os.path.join(os.path.dirname(__file__), "data", "reminders.json")
+_MACROS_PATH    = os.path.join(os.path.dirname(__file__), "data", "macros.json")
+
+
+def load_macros() -> list:
+    try:
+        with open(_MACROS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def save_macros(macros: list) -> None:
+    try:
+        os.makedirs(os.path.dirname(_MACROS_PATH), exist_ok=True)
+        with open(_MACROS_PATH, "w", encoding="utf-8") as f:
+            json.dump(macros, f, indent=2)
+    except Exception:
+        pass
 
 
 def _load_reminders() -> list:
@@ -2482,6 +2513,39 @@ def _ih_set_timer(m, t, allow_prompt, confirm_fn, restart_fn):
         seconds, label = timer
         _vera_confirm("timer")
         _start_timer(seconds, label)
+        return True
+    return False
+
+
+# --- Command macros (premium) ---
+@_intent(460, r"^.+$")
+def _ih_macros(m, t, allow_prompt, confirm_fn, restart_fn):
+    macros = load_macros()
+    if not macros:
+        return False
+    norm_t = _normalize_text(t)
+    for macro in macros:
+        phrase = str(macro.get("phrase", "")).strip().lower()
+        steps  = macro.get("steps", [])
+        if not phrase or not steps:
+            continue
+        if _normalize_text(phrase) != norm_t:
+            continue
+        try:
+            from license import is_premium as _is_premium
+            _premium = _is_premium()
+        except Exception:
+            _premium = False
+        if not _premium:
+            _tts_speak("Command macros require a premium license.")
+            return True
+        def _run_steps(steps=steps):
+            import time as _t
+            for step in steps:
+                handle_transcript(step, allow_prompt=False, confirm_fn=confirm_fn, restart_fn=restart_fn)
+                _wait_for_tts()   # wait for any TTS from this step to finish
+                _t.sleep(1.5)     # then add the fixed gap before the next step
+        threading.Thread(target=_run_steps, daemon=True).start()
         return True
     return False
 
