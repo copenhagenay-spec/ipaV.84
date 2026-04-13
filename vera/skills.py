@@ -2648,6 +2648,7 @@ def _ih_close_current(m, t, allow_prompt, confirm_fn, restart_fn):
         result = subprocess.run(
             ["taskkill", "/f", "/pid", str(pid.value)],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=5,
         )
         return result.returncode == 0
     except Exception:

@@ -2,7 +2,7 @@
 ; Requires Inno Setup 6+ — https://jrsoftware.org/isinfo.php
 
 #define AppName "VERA"
-#define AppVersion "0.97.7"
+#define AppVersion "0.97.7.1"
 #define AppExe "launcher_out\VERA.exe"
 
 [Setup]

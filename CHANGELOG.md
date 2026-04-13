@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.97.7.1
+- Fixed: "close this" command could hang VERA indefinitely if the target process was in a protected or unresponsive state; taskkill now has a 5-second timeout and VERA stays responsive regardless of the result
+
 ## 0.97.7
 - Added: Command Macros (Premium) — chain multiple commands into one phrase; each step runs in sequence, waiting for VERA to finish speaking before starting the next; configure in Integrations tab
 - Fixed: Ctrl+Scroll text scaling now works on all tabs — collapsible list headers and description labels throughout the UI all scale correctly (moved from 0.97.6.2)
