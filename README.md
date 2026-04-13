@@ -1,6 +1,6 @@
 # VERA — Voice Enabled Response Assistant
 
-Offline personal voice assistant for Windows. No cloud, no API key required — everything runs locally on your machine.
+Personal voice assistant for Windows. Speech recognition and TTS run locally — cloud AI is optional.
 
 ---
 
@@ -20,10 +20,9 @@ Offline personal voice assistant for Windows. No cloud, no API key required — 
 The setup wizard opens automatically on first launch:
 
 1. Choose **Language** (English or Spanish)
-2. Choose **Mode** — Hold-to-talk, Toggle-to-talk, or Wake word
-3. Download a speech model if prompted (English model is bundled, Spanish downloads separately)
-4. Optional: **Import Steam Apps** to add your games as voice commands
-5. Click **Finish** — VERA starts listening in the background
+2. Choose **Listening Mode** — Wake Word, Hold-to-talk, or Push to Toggle
+3. Optional: **Import Steam Apps** to add your games as voice commands
+4. Click **Finish** — VERA starts listening in the background
 
 ---
 
@@ -35,27 +34,38 @@ Say `what can I say` at any time to hear all available commands.
 |---|---|
 | Apps | `open spotify`, `close discord` |
 | Search | `search for <query>`, `youtube <query>` |
-| Media | `play`, `pause`, `skip`, `volume up`, `mute` |
-| Timers | `set a timer 5 minutes`, `cancel timer` |
-| Notes | `note <text>`, `open notes`, `delete last note` |
-| Clipboard | `copy that`, `read clipboard`, `clear clipboard` |
-| Keybinds | `reload` → presses R (configured in Actions tab) |
-| Discord | `discord <channel> <message>`, `discord <server> <channel> <message>`, `read discord <server> <channel>` |
-| System | `sleep computer`, `restart assistant` |
-| Conversation | `tell me a joke`, `what's your name`, `good morning` |
+| Media | `play`, `pause`, `skip`, `volume up` |
+| Weather & Date | `weather in <city>`, `what's the date` |
+| News | `give me the news` |
+| Timers & Reminders | `set a timer 5 minutes`, `remind me to <thing> at <time>` |
+| Notes & Memory | `note <text>`, `remember <fact>` |
+| Key Binds | `reload` → presses R (configured in Integrations tab) |
+| Command Macros | say a phrase → runs a chain of commands (Premium) |
+| Discord | `discord <channel> <message>`, `read discord <channel>` |
+| Gaming | `start gaming mode`, `show overlay` |
+| System | `sleep computer`, `restart computer`, `shut down computer` |
+| Conversation | `tell me a joke`, `good morning` |
 
-> **Note:** Keybinds may be blocked by anti-cheat software (EAC/BattlEye) in protected games. Use at your own risk.
+> **Note:** Key binds may be blocked by anti-cheat software (EAC/BattlEye) in protected games. Use at your own risk.
 
 ---
 
-## Keybinds & Macros
+## Key Binds
 
-Map a spoken phrase to a keypress or sequence of keys in the **Actions** tab:
+Map a spoken phrase to a keypress or sequence of keys in the **Integrations** tab:
 
 - Single key: `reload` → `r`
 - Combo: `quick save` → `ctrl+s`
 - Macro sequence: `eject` → `f1 > space > enter`
 - Mouse side buttons supported as push-to-talk key
+
+---
+
+## Command Macros (Premium)
+
+Chain multiple voice commands into one phrase — configured in the **Integrations** tab.
+
+> **Example:** Say "good morning" → VERA opens Spotify, reads the weather, and checks your reminders in sequence.
 
 ---
 
@@ -67,7 +77,7 @@ Click **Import Steam** in the Apps tab to automatically add your installed games
 
 ## AI Setup (Optional)
 
-The `ask <question>` command supports on-demand AI responses. Paste your key in **Apps → AI API Key**.
+The `ask <question>` command supports on-demand AI responses. Paste your key in **Integrations → AI API Key**.
 
 | Provider | Key prefix | Notes |
 |---|---|---|
@@ -83,7 +93,7 @@ VERA detects which provider to use automatically based on your key format.
 
 - **Nothing transcribed** — check Windows microphone permissions and your input device in Settings
 - **App won't open** — run `run_ipa.cmd` directly to see errors in the terminal
-- **Command not triggering** — check **Last Transcript** in the UI for misheard words, add a mishear correction
+- **Command not triggering** — check **Last Transcript** in the UI for misheard words; use the Training tab to add corrections
 - **Crash logs** — saved to `%LocalAppData%\VERA\data\logs\assistant.log`
 
 ---
@@ -101,7 +111,7 @@ Your settings (`config.json`) and memory (`memory.json`) are preserved after uni
 If you prefer to run from source instead of using the installer:
 
 1. Clone the repo
-2. Run `setup.cmd` to install dependencies
+2. Run `setup_installer.cmd` to install dependencies
 3. Run `run_ipa.cmd` to start VERA
 
 ---
