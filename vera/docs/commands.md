@@ -13,8 +13,11 @@ A full list of everything you can say to VERA. Say **"what can I say"** at any t
 | `open that again` | Reopens the last app you opened with VERA |
 | `close <app name>` | Closes the app |
 | `close this` | Closes the currently active window |
+| `add alias <shortcut> for <app name>` | Creates a shorter name you can use to open an app |
 
 > **Examples:** "open discord", "open rust", "launch opera gx", "close steam"
+>
+> **Alias example:** "add alias music for spotify" — then say "open music" to launch Spotify
 
 ---
 
@@ -67,6 +70,9 @@ A full list of everything you can say to VERA. Say **"what can I say"** at any t
 | `volume down` | Decreases system volume by 10% |
 | `set volume <number>` | Sets system volume to a specific level (0–100) |
 | `set volume max` | Sets system volume to 100% |
+| `set <app> volume <number>` | Sets the volume for a specific app (0–100) |
+
+> **Example:** "set spotify volume 50", "set discord volume 20"
 
 ---
 
@@ -88,8 +94,11 @@ A full list of everything you can say to VERA. Say **"what can I say"** at any t
 | `weather in <city>` | Reads the current weather for that city |
 | `what's the weather in <city>` | Same as above |
 | `what's the date` / `what day is it` | Reads the current date |
+| `what time is it` | Reads the current time |
 
-> **Example:** "weather in new york", "what's the date"
+> **Example:** "weather in new york", "what's the date", "what time is it"
+
+> **Tip:** If the game overlay is visible, weather results are also pinned to the top of the overlay in real time.
 
 ---
 
@@ -141,6 +150,19 @@ A full list of everything you can say to VERA. Say **"what can I say"** at any t
 | `clear all notes` | Deletes all notes |
 
 > **Example:** "note pick up milk on the way home"
+
+---
+
+## Clipboard
+
+| What to say | What happens |
+|---|---|
+| `copy <text>` | Copies the text to your clipboard |
+| `paste` / `paste that` / `paste clipboard` | Pastes whatever is in your clipboard |
+| `read clipboard` | Reads your clipboard contents aloud |
+| `clear clipboard` | Clears your clipboard |
+
+> **Example:** "copy hello world", "paste that"
 
 ---
 

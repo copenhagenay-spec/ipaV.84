@@ -19,11 +19,13 @@ When you say **"open \<app name\>"**, VERA looks up that name in its app list an
 
 On every startup VERA scans your PC for common apps and adds any it finds automatically. These include:
 
-- Chrome, Firefox, Edge, Opera GX
-- Discord, Spotify, Steam
-- Notepad, Calculator, Task Manager, VLC, OBS
+- Chrome, Firefox, Edge, Opera, Opera GX
+- Steam, VLC, OBS
+- Notepad, Calculator, Task Manager, File Explorer
 
 You don't need to do anything — if the app is installed it will just work.
+
+> **Note:** Spotify and Discord are **not** auto-discovered. To open them by voice you need to add them manually — see below for common paths.
 
 ---
 
@@ -54,6 +56,15 @@ If an app wasn't auto-discovered and isn't on Steam, you can add it manually:
 5. Click **Add App**
 
 > **Example:** App name: `signal` — App command: `C:\Users\You\AppData\Local\Signal\signal.exe`
+
+**Common paths for apps not auto-discovered:**
+
+| App | App command |
+|---|---|
+| Spotify | `C:\Users\<YourName>\AppData\Roaming\Spotify\Spotify.exe` |
+| Discord | `C:\Users\<YourName>\AppData\Local\Discord\Update.exe --processStart Discord.exe` |
+
+Replace `<YourName>` with your Windows username.
 
 You can also use this to open websites by voice — just put a URL as the app command:
 
