@@ -1,5 +1,5 @@
 # VERA Terms of Service
-Last updated: March 28, 2026
+Last updated: April 12, 2026
 
 ## 1. ACCEPTANCE OF TERMS
 By downloading, installing, or using VERA ("the Software"), you agree to these Terms of Service. If you do not agree, do not use the Software.
