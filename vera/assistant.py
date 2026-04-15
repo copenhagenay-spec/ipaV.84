@@ -87,6 +87,13 @@ from skills import handle_transcript, log_unmatched
 from steam import find_steam_apps
 
 
+_NUMPAD_VK_TO_NAME = {
+    96: "num0", 97: "num1", 98: "num2", 99: "num3", 100: "num4",
+    101: "num5", 102: "num6", 103: "num7", 104: "num8", 105: "num9",
+    110: "numdecimal", 106: "nummultiply", 107: "numadd",
+    109: "numsubtract", 111: "numdivide",
+}
+
 HOTKEY_CHOICES = [
     "<ctrl>+<alt>+s",
     "<ctrl>+<alt>+v",
@@ -1067,8 +1074,12 @@ def main() -> None:
             return None
 
         def _key_name(key):
-            if isinstance(key, keyboard.KeyCode) and key.char:
-                return key.char.lower()
+            if isinstance(key, keyboard.KeyCode):
+                vk = getattr(key, "vk", None)
+                if vk in _NUMPAD_VK_TO_NAME:
+                    return f"<{_NUMPAD_VK_TO_NAME[vk]}>"
+                if key.char:
+                    return key.char.lower()
             if key == keyboard.Key.space:
                 return "<space>"
             name = getattr(key, "name", None)
@@ -1162,8 +1173,12 @@ def main() -> None:
         }
 
         def _key_name(key):
-            if isinstance(key, keyboard.KeyCode) and key.char:
-                return key.char.lower()
+            if isinstance(key, keyboard.KeyCode):
+                vk = getattr(key, "vk", None)
+                if vk in _NUMPAD_VK_TO_NAME:
+                    return _NUMPAD_VK_TO_NAME[vk]
+                if key.char:
+                    return key.char.lower()
             if key == keyboard.Key.space:
                 return "space"
             name = getattr(key, "name", None)
@@ -1252,8 +1267,12 @@ def main() -> None:
         }
 
         def _key_name(key):
-            if isinstance(key, _kb.KeyCode) and key.char:
-                return key.char.lower()
+            if isinstance(key, _kb.KeyCode):
+                vk = getattr(key, "vk", None)
+                if vk in _NUMPAD_VK_TO_NAME:
+                    return _NUMPAD_VK_TO_NAME[vk]
+                if key.char:
+                    return key.char.lower()
             if key == _kb.Key.space:
                 return "space"
             name = getattr(key, "name", None)
@@ -1894,12 +1913,15 @@ def main() -> None:
         def _key_name(key):
             """Get a canonical name for a non-modifier key, even when held with alt/ctrl."""
             if isinstance(key, _kb.KeyCode):
+                vk = getattr(key, "vk", None)
+                if vk in _NUMPAD_VK_TO_NAME:
+                    return _NUMPAD_VK_TO_NAME[vk]
                 # key.char may be None or a weird Unicode when a modifier is held —
                 # fall back to the virtual key code to get the base character.
                 if key.char and key.char.isprintable() and not _mod_name(key):
                     return key.char.lower()
-                if hasattr(key, "vk") and key.vk and 32 <= key.vk <= 126:
-                    return chr(key.vk).lower()
+                if vk and 32 <= vk <= 126:
+                    return chr(vk).lower()
                 return None
             name = getattr(key, "name", None)
             return name.lower() if name else None

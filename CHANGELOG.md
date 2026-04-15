@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.97.8.1
+- Fixed: numpad keys (Num0–Num9, NumDecimal, NumMultiply, NumAdd, NumSubtract, NumDivide) now record and fire correctly in keybinds
+- Fixed: reminder list queries ("what's my reminder set to", "what are my reminders", etc.) were being misrouted to the AI and returning fabricated answers; now handled correctly by the local intent system
+
 ## 0.97.8
 - Added: weather shown on game overlay — say "weather in <city>" with the overlay visible to see current conditions pinned at the top in amber (city, temp, description on line 1; high/low/rain chance on line 2)
 - Improved: game overlay rebuilt with Qt layout system — cleaner rendering, better visual hierarchy, separator between weather and exchanges, foundation for future pinnable widget cards

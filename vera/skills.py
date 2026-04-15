@@ -1290,6 +1290,14 @@ def _show_help() -> None:
         print(f"Help display failed: {exc}")
 
 
+_NUMPAD_VK = {
+    "num0": 96, "num1": 97, "num2": 98, "num3": 99, "num4": 100,
+    "num5": 101, "num6": 102, "num7": 103, "num8": 104, "num9": 105,
+    "numdecimal": 110, "nummultiply": 106, "numadd": 107,
+    "numsubtract": 109, "numdivide": 111,
+}
+
+
 def _resolve_key(raw: str):
     """Resolve a single key string to a pynput key object or mouse button."""
     raw = raw.strip().lower()
@@ -1299,6 +1307,8 @@ def _resolve_key(raw: str):
         from pynput import mouse as _mouse  # type: ignore
         return ("mouse", _mouse.Button.x1 if raw == "x1" else _mouse.Button.x2)
     from pynput import keyboard  # type: ignore
+    if raw in _NUMPAD_VK:
+        return ("key", keyboard.KeyCode.from_vk(_NUMPAD_VK[raw]))
     if len(raw) == 1:
         return ("key", keyboard.KeyCode.from_char(raw))
     obj = getattr(keyboard.Key, raw, None)
@@ -2165,7 +2175,7 @@ def _ih_cancel_all_reminders(m, t, allow_prompt, confirm_fn, restart_fn):
 
 
 # --- List reminders ---
-@_intent(872, r"\b(?:what are my reminders|list my reminders|show my reminders|do i have any reminders|my reminders)\b")
+@_intent(872, r"\b(?:what(?:'s| is) (?:on )?my reminder(?:s| list| set to)?|what are my reminders|list my reminders|show my reminders|read my reminders|do i have any reminders|my reminders)\b")
 def _ih_list_reminders(m, t, allow_prompt, confirm_fn, restart_fn):
     import datetime as _dt
     reminders = _load_reminders()

@@ -1,16 +1,46 @@
 # Changelog
 
+## 0.97.8.1
+- Fixed: numpad keys (Num0–Num9, NumDecimal, NumMultiply, NumAdd, NumSubtract, NumDivide) now record and fire correctly in keybinds
+- Fixed: reminder list queries ("what's my reminder set to", "what are my reminders", etc.) were being misrouted to the AI and returning fabricated answers; now handled correctly by the local intent system
+
+## 0.97.8
+- Added: weather shown on game overlay — say "weather in <city>" with the overlay visible to see current conditions pinned at the top in amber (city, temp, description on line 1; high/low/rain chance on line 2)
+- Improved: game overlay rebuilt with Qt layout system — cleaner rendering, better visual hierarchy, separator between weather and exchanges, foundation for future pinnable widget cards
+- Docs: full documentation pass — fixed factual errors, added missing commands (time, clipboard, per-app volume, aliases), added overlay guide, macros guide, personality guide, and comprehensive troubleshooting guide
+
+## 0.97.7.1
+- Fixed: "close this" command could hang VERA indefinitely if the target process was in a protected or unresponsive state; taskkill now has a 5-second timeout and VERA stays responsive regardless of the result
+
+## 0.97.7
+- Added: Command Macros (Premium) — chain multiple commands into one phrase; each step runs in sequence, waiting for VERA to finish speaking before starting the next; configure in Integrations tab
+- Fixed: Ctrl+Scroll text scaling now works on all tabs — collapsible list headers and description labels throughout the UI all scale correctly (moved from 0.97.6.2)
+
+## 0.97.6.2
+- Fixed: Ctrl+Scroll text scaling now works on all tabs — collapsible list headers (Registered Apps, App Aliases, Voice Actions, Key Binds) and description labels throughout the UI now scale correctly
+
+## 0.97.6.1
+- Added: idle chatter toggle — "Enable idle chatter" checkbox in Settings → Personality; checked by default; uncheck to stop VERA from speaking unless spoken to
+
+## 0.97.6
+- Added: collapsible list sections — Voice Actions, Key Binds, Registered Apps, and App Aliases now collapse by default with item count shown in header
+- Added: Setup wizard redesign — accent header bar, card layout, blue Finish Setup button
+- Added: Ctrl+Scroll to scale text size across the UI (Normal → Large → X-Large); resets on restart
+- Added: Secondary PTT — record any keyboard key, mouse button, or joystick button as a second push-to-talk alongside your primary hold key; moved to Recording Settings
+- Changed: Input mode labels updated — "Timed mic" → "Wake Word", "Hotkey" → "Push to Toggle" (wizard was out of sync with main UI)
+- Removed: Seconds field from Recording Settings (unused since timed mic mode was replaced)
+
 ## 0.97.5
 - Jarvis personality mode — formal, composed, dry British wit; free tier alongside Professional
 - Game overlay — transparent always-on-top bar showing last 3 You/VERA exchanges; say "show overlay" / "hide overlay" or set a hotkey; position configurable in Settings (Top Left default)
 - Gaming mode — say "start gaming mode" to strip responses to ultra-short, silence idle chatter, and suppress unrecognized command feedback; status bar shows "Gaming Mode" while active; say "stop gaming mode" to exit
 
 ## 0.97.4
-- Fixed: note command ignored when transcript starts with "notes." followed by a remember-pattern word — note intent now takes priority at start of transcript
+- Fixed: note command ignored when transcript starts with "notes." followed by a remember-pattern word
 - Added: date command — "what's the date" / "what day is it" returns current date without requiring Groq
 - Added: install path display in Settings Utilities — shows VERA's install folder with Open and Copy buttons
-- Fixed: voice restart command leaving old instance alive with a dead listener — restart now calls exit directly instead of via daemon thread
-- Help command updated — Reminders, mute/unmute, and date added to both text and overlay help
+- Fixed: voice restart command leaving old instance alive with a dead listener
+- Help command updated — Reminders, mute/unmute, and date added
 
 ## 0.97.3
 - Added: mouse side button support — extra mouse buttons (x1/x2) can now be recorded as hold-to-talk or toggle keys
@@ -18,13 +48,13 @@
 
 ## 0.97.2
 - Fixed: keybind "+ Step" key field not updating after recording a key
-- Fixed: modifier key combos (alt+n, ctrl+shift+f, etc.) not captured — now recorded on key-down using vk fallback when key.char is None under Windows
-- Fixed: hold-to-talk occasionally freezing — recording_flag now cleared in finally block so a background exception can no longer leave the listener stuck
-- Fixed: tray icon not recovering after Windows Explorer restart — tray loop now auto-rebuilds the icon instead of staying gone
+- Fixed: modifier key combos (alt+n, ctrl+shift+f, etc.) not captured
+- Fixed: hold-to-talk occasionally freezing
+- Fixed: tray icon not recovering after Windows Explorer restart
 
 ## 0.97.1
-- Fixed: VERA not launching on Python 3.11/3.12/3.13 installs — launcher now searches known Python paths instead of relying on PATH
-- Fixed: `run_ipa.cmd` hardcoded to Python 3.14 only — now tries all supported versions
+- Fixed: VERA not launching on Python 3.11/3.12/3.13 installs
+- Fixed: `run_ipa.cmd` hardcoded to Python 3.14 only
 
 ## 0.97.0
 - UI rebuilt on PySide6/Qt6 — eliminates scroll tearing, uses native OS rendering
@@ -38,20 +68,66 @@
 - Key bind display: angle brackets stripped from key names (e.g. `caps_lock` instead of `<caps_lock>`)
 - Utilities section: all buttons unified to secondary style
 
+## 0.90.1.1
+- "close vera" now kills only the VERA process — PID written to `data/vera.pid` on startup; targeted kill instead of matching by exe name
+
+## 0.90.0
+- UI overhaul — inline notifications replace popups, smooth scrolling, unsaved changes indicator, loading overlay, styled listboxes (thepyro-dev)
+- Inline key recording overlay — record hotkeys and hold keys directly inside the window instead of a separate dialog
+- Fixed hold-to-talk with Caps Lock — releasing the key no longer restarts recording due to synthetic keybd_event from caps lock state restore
+- New logo, tray icon, and app icon — refreshed visual design
+
 ## 0.89.0
 - Bug report now submits to Discord automatically — creates a private ticket with description, VERA version, and full log zip attached
 - Description and Discord username prompts added to bug report flow
 - Ticket thread named after user's Discord handle if provided
 - `requests` added to dependencies
 
+## 0.88.0
+- Multi-server Discord support — add servers with nicknames; use 'discord <server> <channel> <message>' to target specific servers
+- Discord tab — dedicated tab for all Discord config; moved out of Integrations
+- Toggle-to-talk mode — press once to start, press again to stop; replaces timed mic mode
+
+## 0.87.0
+- Mishear Training UI — new Training tab shows transcripts VERA didn't understand; click one, type what you meant, save; corrections apply immediately without restart
+- PTT beep volume — slider in Settings (0–100%) controls how loud the push-to-talk beeps are
+- Single instance enforcement — opening VERA a second time shows a warning and exits instead of opening a duplicate window
+- Voice Output device — select a virtual audio device (e.g. VB-Cable) in Settings; "read out" routes TTS through it so it plays through Discord as your mic
+
+## 0.86.4
+- Updater now automatically replaces VERA.exe — no more manual reinstalls needed for launcher updates
+
+## 0.86.3
+- Fixed desktop and Start Menu shortcuts not launching VERA
+- Media keys (play, pause, skip, previous) now work with any player — Apple Music, YouTube, etc. — not just Spotify
+
+## 0.86.2
+- Fixed VERA.exe not launching after fresh install — launcher was spawning itself recursively instead of finding the real Python interpreter
+
+## 0.86.1
+- Pinned all Python dependencies to exact versions with SHA256 hashes — prevents supply chain attacks
+- Fixed VERA.exe crash on fresh install (corrupted release build replaced with clean build)
+
+## 0.86
+- Discord delete — "discord delete <channel>" removes the last message (requires MANAGE_MESSAGES)
+- Discord purge — "discord purge <channel> <n>" bulk deletes up to 100 messages
+- Voice Actions list now clickable — select any entry and Remove Selected instead of only removing last
+- Punctuation stripping in transcript preprocessing — fixes faster-whisper adding periods/commas/question marks that broke command matching
+- Mishear corrections for purge (perch/perge/merge → purge)
+
+## 0.85.5
+- New brand assets — low-poly plant icon and VERA figure logo with transparent backgrounds
+- Status indicator dot in status bar (gray=idle, green=listening, red=recording, blue=processing)
+- faster-whisper replaces Vosk — MIT licensed, auto-downloads on first run (~150MB), better accuracy
+- kokoro-onnx replaces kokoro — compatible with Python 3.14, uses offline model files
+- VERA.exe launcher — no console window on startup
+- Add Desktop Shortcut button in Settings → Utilities
+
 ## 0.85.2
-- Key binds: mouse side button support (x1/x2) fixed — was silently failing
-- Key binds: combo support fixed (alt+n, ctrl+shift+f etc.) — bracket parsing bug resolved
-- Key binds: macro sequences — chain multiple keypresses with > separator (e.g. x1 > q)
-- Key binds: remove specific bind by clicking to select then clicking Remove Selected
-- Vosk noise filter — "the", "a", "an" and other artifacts silently dropped instead of triggering fallback
-- Leading "the" stripped globally — "the open map" → "open map" before command matching
-- keybinds.md updated with full usage guide and anti-cheat warning
+- Intent-based command router — decorator-based priority system replacing if/elif chain
+- preprocess_transcript() pipeline — filler strip, mishear corrections, leading/trailing noise removal
+- Memory system — long-term (memory.json) + short-term session context
+- Conversational depth — mood/activity detection, session-aware responses, name-aware greetings
 
 ## 0.85.1
 - Personality system — moved all response pools into `personality.py` for cleaner separation
