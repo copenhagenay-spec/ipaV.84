@@ -2162,7 +2162,7 @@ def _ih_set_reminder(m, t, allow_prompt, confirm_fn, restart_fn):
 
 
 # --- Cancel all reminders ---
-@_intent(871, r"\b(?:cancel all reminders|clear all reminders|delete all reminders|cancel my reminders|remove all reminders)\b")
+@_intent(871, r"\b(?:(?:cancel|clear|delete|remove)(?:\s+all)?\s+(?:my\s+)?reminders|get rid of (?:my\s+)?reminders)\b")
 def _ih_cancel_all_reminders(m, t, allow_prompt, confirm_fn, restart_fn):
     reminders = _load_reminders()
     count = len([r for r in reminders if r["ts"] > time.time()])

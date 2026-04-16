@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.97.8.2
+- Fixed: cancel/clear/delete reminders now recognized with more natural phrasings ("cancel reminders", "delete my reminders", "get rid of reminders", etc.)
+- Improved: Discord username is now required when submitting a bug report — you'll receive a ping in the server when your bug is confirmed and when it's fixed
+
 ## 0.97.8.1
 - Fixed: numpad keys (Num0–Num9, NumDecimal, NumMultiply, NumAdd, NumSubtract, NumDivide) now record and fire correctly in keybinds
 - Fixed: reminder list queries ("what's my reminder set to", "what are my reminders", etc.) were being misrouted to the AI and returning fabricated answers; now handled correctly by the local intent system

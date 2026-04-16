@@ -2473,8 +2473,13 @@ def main() -> None:
             _notify_info("Bug Report", "Description is required.")
             return
 
-        discord_username, _ = QInputDialog.getText(root, "Bug Report", "Your Discord username (optional — press Enter to skip):")
+        discord_username, ok = QInputDialog.getText(root, "Bug Report", "Your Discord username (required — we'll update you when fixed):")
+        if not ok:
+            return
         discord_username = (discord_username or "").strip()
+        if not discord_username:
+            _notify_info("Bug Report", "Discord username is required so we can update you when the bug is fixed.")
+            return
 
         # ── Zip logs ──────────────────────────────────────────────────────────
         base_dir = os.path.dirname(__file__)
