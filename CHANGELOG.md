@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.97.9
+- Improved: updater now downloads and runs the silent installer instead of extracting a zip — faster, cleaner, and handles all dependencies automatically
+- Fixed: Discord Rich Presence timer now resets correctly when VERA restarts — no longer requires a PC reboot to refresh
+- Fixed: tray icon import regression in public builds — VERA could show "Tray Unavailable" on fresh installs even with dependencies present
+
 ## 0.97.8.4
 - Fixed: "Downloading update..." status now shows immediately after confirming so it's clear the update is in progress
 - Fixed: update error messages now display correctly if the download fails

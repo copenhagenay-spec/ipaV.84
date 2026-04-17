@@ -11,7 +11,6 @@ import os
 import time
 import zipfile
 import shutil
-import tempfile
 import urllib.request
 import json
 from PySide6.QtWidgets import (
@@ -524,6 +523,7 @@ def main() -> None:
             rpc = Presence(_RPC_CLIENT_ID)
             rpc.connect()
             _rpc["conn"] = rpc
+            _rpc["start"] = int(time.time())
             _rpc_set("Standing by")
         except Exception:
             pass
@@ -919,50 +919,6 @@ def main() -> None:
         with urllib.request.urlopen(url, timeout=10) as resp:
             return resp.read().decode("utf-8").strip()
 
-    def _backup_current_app(backup_dir: str) -> None:
-        base_dir = os.path.dirname(__file__)
-        os.makedirs(backup_dir, exist_ok=True)
-        for name in os.listdir(base_dir):
-            if name.lower() == "data":
-                continue
-            src = os.path.join(base_dir, name)
-            dst = os.path.join(backup_dir, name)
-            if os.path.isdir(src):
-                shutil.copytree(src, dst, dirs_exist_ok=True)
-            else:
-                shutil.copy2(src, dst)
-
-    def _apply_update_from_zip(zip_path: str) -> None:
-        base_dir = os.path.dirname(__file__)
-        tmp_dir = tempfile.mkdtemp(prefix="vera_update_")
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(tmp_dir)
-
-        # GitHub zip extracts to a single top-level folder
-        entries = [os.path.join(tmp_dir, n) for n in os.listdir(tmp_dir)]
-        root_dir = next((p for p in entries if os.path.isdir(p)), tmp_dir)
-
-        # If repo has a nested app folder, pick the one containing assistant.py
-        candidate = None
-        for path, dirs, files in os.walk(root_dir):
-            if "assistant.py" in files:
-                candidate = path
-                break
-        src_root = candidate or root_dir
-
-        for name in os.listdir(src_root):
-            if name.lower() == "data":
-                continue
-            src = os.path.join(src_root, name)
-            dst = os.path.join(base_dir, name)
-            if os.path.isdir(src):
-                if os.path.exists(dst):
-                    shutil.rmtree(dst)
-                shutil.copytree(src, dst)
-            else:
-                shutil.copy2(src, dst)
-
-        shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def _log_to_file(message: str) -> None:
         try:
@@ -996,35 +952,18 @@ def main() -> None:
                 _bridge.post(lambda: _show_ui_info("Update", "Downloading update... VERA will restart when ready."))
                 def _do_install():
                     try:
-                        base_dir = os.path.dirname(__file__)
-                        data_dir = os.path.join(base_dir, "data")
+                        data_dir = os.path.join(os.path.dirname(__file__), "data")
                         os.makedirs(data_dir, exist_ok=True)
-                        backup_dir = os.path.join(data_dir, f"backup_{time.strftime('%Y%m%d_%H%M%S')}")
-                        _backup_current_app(backup_dir)
+                        installer_name = f"VERA_Setup_{latest}.exe"
+                        installer_url  = f"https://github.com/copenhagenay-spec/Vera-beta/releases/download/v{latest}/{installer_name}"
+                        installer_path = os.path.join(data_dir, installer_name)
+                        urllib.request.urlretrieve(installer_url, installer_path)
 
-                        zip_url = "https://github.com/copenhagenay-spec/Vera-beta/archive/refs/heads/main.zip"
-                        zip_path = os.path.join(data_dir, "update.zip")
-                        urllib.request.urlretrieve(zip_url, zip_path)
-                        _apply_update_from_zip(zip_path)
-                        try:
-                            os.remove(zip_path)
-                        except Exception:
-                            pass
-
-                        # Update VERA.exe launcher
-                        exe_url = f"https://github.com/copenhagenay-spec/Vera-beta/releases/download/v{latest}/VERA.exe"
-                        launcher_out = os.path.join(base_dir, "launcher_out", "VERA.exe")
-                        if os.path.exists(os.path.dirname(launcher_out)):
-                            try:
-                                urllib.request.urlretrieve(exe_url, launcher_out)
-                            except Exception:
-                                pass
-
-                        _bridge.post(lambda: _notify_info("Update", "Update installed. Restarting VERA..."))
-                        import time as _time; _time.sleep(1.5)
                         _release_mutex()
-                        script_path = os.path.abspath(__file__)
-                        subprocess.Popen([sys.executable, script_path])
+                        subprocess.Popen(
+                            [installer_path, "/VERYSILENT", "/NORESTART", "/CLOSEAPPLICATIONS"],
+                            close_fds=True,
+                        )
                         os._exit(0)
                     except Exception as exc:
                         err_msg = str(exc)
@@ -2362,9 +2301,10 @@ def main() -> None:
     # --- System Tray ---
     def _create_tray_icon():
         try:
-            from pystray import pystray  # type: ignore
+            import pystray
             from PIL import Image, ImageDraw  # type: ignore
-        except Exception:
+        except Exception as exc:
+            _log_to_file(f"TRAY_IMPORT_FAILED: {exc}")
             return None
 
         def _make_image():
