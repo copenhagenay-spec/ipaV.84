@@ -9,21 +9,45 @@ from PySide6.QtWidgets import (
     QTabWidget, QScrollArea, QFrame, QProgressBar, QSizePolicy,
     QSpacerItem,
 )
-from PySide6.QtCore import Qt, Signal, QObject
-from PySide6.QtGui import QFont, QPixmap, QColor
+from PySide6.QtCore import Qt, Signal, QObject, QSize
+from PySide6.QtGui import QFont, QPixmap, QColor, QIcon
 
 
 # ---------------------------------------------------------------------------
 # Style helpers
 # ---------------------------------------------------------------------------
 
-_ACCENT   = "#2563eb"
-_DANGER   = "#c0392b"
-_SURFACE  = "#2b2b2b"
-_BG       = "#1e1e1e"
-_TEXT     = "#ffffff"
-_MUTED    = "#888888"
-_WARN_FG  = "#ffaa00"
+# Free tier palette
+_ACCENT        = "#2563eb"
+_ACCENT_HOVER  = "#1d4ed8"
+_ACCENT_PRESS  = "#1e40af"
+_DANGER        = "#c0392b"
+_SURFACE       = "#2b2b2b"
+_BG            = "#1e1e1e"
+_TEXT          = "#ffffff"
+_MUTED         = "#888888"
+_WARN_FG       = "#ffaa00"
+_TITLE_COLOR   = "#a8d5b5"
+
+# Premium gold palette
+_PREM_ACCENT       = "#c9a84c"
+_PREM_ACCENT_HOVER = "#b8962e"
+_PREM_ACCENT_PRESS = "#a07c20"
+_PREM_SURFACE      = "#1e1a14"
+_PREM_BG           = "#141414"
+_PREM_TITLE_COLOR  = "#c9a84c"
+
+
+def _apply_premium_theme() -> None:
+    """Swap color constants and recompute style strings for premium tier."""
+    global _ACCENT, _ACCENT_HOVER, _ACCENT_PRESS, _SURFACE, _BG, _TITLE_COLOR
+    _ACCENT        = _PREM_ACCENT
+    _ACCENT_HOVER  = _PREM_ACCENT_HOVER
+    _ACCENT_PRESS  = _PREM_ACCENT_PRESS
+    _SURFACE       = _PREM_SURFACE
+    _BG            = _PREM_BG
+    _TITLE_COLOR   = _PREM_TITLE_COLOR
+    _rebuild_styles()
 
 # ---------------------------------------------------------------------------
 # Text scale registry
@@ -54,76 +78,94 @@ def apply_label_scale(scale_name: str) -> None:
         body.setPixelSize(round(12 * factor))
         app.setFont(body)
 
-_BTN_PRIMARY = f"""
-    QPushButton {{
-        background-color: {_ACCENT}; color: {_TEXT};
-        border-radius: 8px; padding: 6px 14px;
-        font-size: 13px;
-    }}
-    QPushButton:hover {{ background-color: #1d4ed8; }}
-    QPushButton:pressed {{ background-color: #1e40af; }}
-"""
-_BTN_SECONDARY = f"""
-    QPushButton {{
-        background-color: #404040; color: {_TEXT};
-        border-radius: 6px; padding: 5px 12px;
-        font-size: 12px;
-    }}
-    QPushButton:hover {{ background-color: #505050; }}
-"""
-_BTN_DANGER = f"""
-    QPushButton {{
-        background-color: {_DANGER}; color: {_TEXT};
-        border-radius: 6px; padding: 5px 12px;
-        font-size: 12px;
-    }}
-    QPushButton:hover {{ background-color: #a93226; }}
-"""
-_BTN_MUTED = f"""
-    QPushButton {{
-        background-color: transparent; color: #aaaaaa;
-        border: 1px solid #555555; border-radius: 6px;
-        padding: 5px 12px; font-size: 12px;
-    }}
-    QPushButton:hover {{ background-color: #333333; }}
-"""
-_LIST_STYLE = f"""
-    QListWidget {{
-        background-color: #262626; color: {_TEXT};
-        border: 1px solid #404040; border-radius: 4px;
-        font-family: "Segoe UI Semibold"; font-size: 11px;
-    }}
-    QListWidget::item:selected {{
-        background-color: {_ACCENT}; color: {_TEXT};
-    }}
-"""
-_ENTRY_STYLE = f"""
-    QLineEdit {{
-        background-color: #333333; color: {_TEXT};
-        border: 1px solid #555555; border-radius: 4px;
-        padding: 4px 8px;
-    }}
-    QLineEdit:focus {{ border: 1px solid {_ACCENT}; }}
-"""
-_COMBO_STYLE = f"""
-    QComboBox {{
-        background-color: #333333; color: {_TEXT};
-        border: 1px solid #555555; border-radius: 4px;
-        padding: 4px 8px;
-    }}
-    QComboBox::drop-down {{ border: none; }}
-    QComboBox QAbstractItemView {{
-        background-color: #2b2b2b; color: {_TEXT};
-        selection-background-color: {_ACCENT};
-    }}
-"""
-_CHECK_STYLE = f"""
-    QCheckBox {{ color: {_TEXT}; }}
-    QCheckBox::indicator {{ width: 16px; height: 16px; }}
-"""
-_RADIO_STYLE = f"""
-    QRadioButton {{ color: {_TEXT}; }}
-"""
+_BTN_PRIMARY   = ""
+_BTN_SECONDARY = ""
+_BTN_DANGER    = ""
+_BTN_MUTED     = ""
+_LIST_STYLE    = ""
+_ENTRY_STYLE   = ""
+_COMBO_STYLE   = ""
+_CHECK_STYLE   = ""
+_RADIO_STYLE   = ""
+
+
+def _rebuild_styles() -> None:
+    """Recompute all QSS style strings from the current color constants."""
+    global _BTN_PRIMARY, _BTN_SECONDARY, _BTN_DANGER, _BTN_MUTED
+    global _LIST_STYLE, _ENTRY_STYLE, _COMBO_STYLE, _CHECK_STYLE, _RADIO_STYLE
+    _BTN_PRIMARY = f"""
+        QPushButton {{
+            background-color: {_ACCENT}; color: {_TEXT};
+            border-radius: 8px; padding: 6px 14px;
+            font-size: 13px;
+        }}
+        QPushButton:hover {{ background-color: {_ACCENT_HOVER}; }}
+        QPushButton:pressed {{ background-color: {_ACCENT_PRESS}; }}
+    """
+    _BTN_SECONDARY = f"""
+        QPushButton {{
+            background-color: #404040; color: {_TEXT};
+            border-radius: 6px; padding: 5px 12px;
+            font-size: 12px;
+        }}
+        QPushButton:hover {{ background-color: #505050; }}
+    """
+    _BTN_DANGER = f"""
+        QPushButton {{
+            background-color: {_DANGER}; color: {_TEXT};
+            border-radius: 6px; padding: 5px 12px;
+            font-size: 12px;
+        }}
+        QPushButton:hover {{ background-color: #a93226; }}
+    """
+    _BTN_MUTED = f"""
+        QPushButton {{
+            background-color: transparent; color: #aaaaaa;
+            border: 1px solid #555555; border-radius: 6px;
+            padding: 5px 12px; font-size: 12px;
+        }}
+        QPushButton:hover {{ background-color: #333333; }}
+    """
+    _LIST_STYLE = f"""
+        QListWidget {{
+            background-color: #262626; color: {_TEXT};
+            border: 1px solid #404040; border-radius: 4px;
+            font-family: "Segoe UI Semibold"; font-size: 11px;
+        }}
+        QListWidget::item:selected {{
+            background-color: {_ACCENT}; color: {_TEXT};
+        }}
+    """
+    _ENTRY_STYLE = f"""
+        QLineEdit {{
+            background-color: #333333; color: {_TEXT};
+            border: 1px solid #555555; border-radius: 4px;
+            padding: 4px 8px;
+        }}
+        QLineEdit:focus {{ border: 1px solid {_ACCENT}; }}
+    """
+    _COMBO_STYLE = f"""
+        QComboBox {{
+            background-color: #333333; color: {_TEXT};
+            border: 1px solid #555555; border-radius: 4px;
+            padding: 4px 8px;
+        }}
+        QComboBox::drop-down {{ border: none; }}
+        QComboBox QAbstractItemView {{
+            background-color: #2b2b2b; color: {_TEXT};
+            selection-background-color: {_ACCENT};
+        }}
+    """
+    _CHECK_STYLE = f"""
+        QCheckBox {{ color: {_TEXT}; }}
+        QCheckBox::indicator {{ width: 16px; height: 16px; }}
+    """
+    _RADIO_STYLE = f"""
+        QRadioButton {{ color: {_TEXT}; }}
+    """
+
+
+_rebuild_styles()
 
 
 def _primary_btn(text, command=None) -> QPushButton:
@@ -332,6 +374,10 @@ class _OverlayWidget(QWidget):
 # ---------------------------------------------------------------------------
 
 def build_ui(window, state: dict, callbacks: dict, constants: dict):
+    from license import is_premium
+    if is_premium():
+        _apply_premium_theme()
+
     _scalable_labels.clear()
 
     HOTKEY_CHOICES      = constants["HOTKEY_CHOICES"]
@@ -457,6 +503,22 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     home_area, home_inner, home_vl = _scrollable_tab()
     tabs.addTab(home_area, "Home")
 
+    # Premium watermarks
+    if is_premium():
+        _wm_row = QHBoxLayout()
+        _wm_row.setContentsMargins(6, 4, 6, 0)
+        _wm_left = QLabel("VERA+")
+        _wm_left.setStyleSheet("color: rgba(201,168,76,55); font-size: 9px; letter-spacing: 4px; background: transparent;")
+        _wm_right = QLabel("PREMIUM TIER")
+        _wm_right.setStyleSheet("color: rgba(201,168,76,55); font-size: 9px; letter-spacing: 3px; background: transparent;")
+        _wm_right.setAlignment(Qt.AlignRight)
+        _wm_row.addWidget(_wm_left)
+        _wm_row.addWidget(_wm_right)
+        _wm_widget = QWidget()
+        _wm_widget.setLayout(_wm_row)
+        _wm_widget.setStyleSheet("background: transparent;")
+        home_vl.addWidget(_wm_widget)
+
     # Logo
     logo_path = _load_logo()
     if logo_path:
@@ -466,9 +528,9 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
             logo_lbl.setPixmap(px.scaled(140, 140, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             logo_lbl.setAlignment(Qt.AlignCenter)
             home_vl.addWidget(logo_lbl)
-    title_lbl = QLabel("V  E  R  A")
+    title_lbl = QLabel("V  E  R  A  +" if is_premium() else "V  E  R  A")
     title_lbl.setAlignment(Qt.AlignCenter)
-    title_lbl.setStyleSheet("font-size: 24px; font-weight: bold; color: #a8d5b5;")
+    title_lbl.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {_TITLE_COLOR};")
     home_vl.addWidget(title_lbl)
 
     # Controls section
@@ -488,21 +550,95 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     mic_ctrl_row = _hrow(_primary_btn("Run Now", _run_now))
     ctrl_vl.addWidget(mic_ctrl_row)
 
+    knob_row = None
+
     def _update_controls():
         m = mode.get()
         if m == "mic":
+            ctrl_card.setVisible(True)
             bg_ctrl_row.setVisible(False)
             mic_ctrl_row.setVisible(True)
+            if knob_row: knob_row.setVisible(False)
         elif m == "wake":
+            ctrl_card.setVisible(False)
             bg_ctrl_row.setVisible(False)
             mic_ctrl_row.setVisible(False)
+            if knob_row: knob_row.setVisible(False)
+        elif m in ("hold", "toggle") and knob_row is not None:
+            ctrl_card.setVisible(False)
+            bg_ctrl_row.setVisible(False)
+            mic_ctrl_row.setVisible(False)
+            knob_row.setVisible(True)
         else:
+            ctrl_card.setVisible(True)
             mic_ctrl_row.setVisible(False)
             bg_ctrl_row.setVisible(True)
+            if knob_row: knob_row.setVisible(False)
 
     mode.trace_add("write", lambda *_: _update_controls())
     _update_controls()
     home_vl.addWidget(ctrl_card)
+
+    # Premium knob — floats below controls card, no card background
+    knob_row = None
+    if is_premium():
+        import os as _os
+        _knob_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "data", "assets", "ptt_knob.png")
+        _knob_px = QPixmap(_knob_path)
+        if not _knob_px.isNull():
+            from PySide6.QtGui import QPainter, QTransform
+
+            _knob_sized = _knob_px.scaled(90, 90, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+            def _make_knob_icon(angle: float) -> QIcon:
+                out = QPixmap(_knob_sized.size())
+                out.fill(QColor(_BG))
+                p = QPainter(out)
+                cx, cy = _knob_sized.width() / 2, _knob_sized.height() / 2
+                t = QTransform()
+                t.translate(cx, cy)
+                t.rotate(angle)
+                t.translate(-cx, -cy)
+                p.setTransform(t)
+                p.drawPixmap(0, 0, _knob_sized)
+                p.end()
+                return QIcon(out)
+
+            # Angle pointing toward top label (Start), bottom label (Stop)
+            knob_btn = QPushButton()
+            knob_btn.setFixedSize(90, 90)
+            knob_btn.setIcon(_make_knob_icon(0))
+            knob_btn.setIconSize(QSize(90, 90))
+            knob_btn.setStyleSheet("QPushButton { background: transparent; border: none; } QPushButton:pressed { margin: 2px; }")
+            knob_btn.setToolTip("Click to start / stop listening")
+
+            _knob_lbl = QLabel("Start Listening")
+            _knob_lbl.setStyleSheet(f"color: {_ACCENT}; font-size: 13px; font-weight: bold; background: transparent;")
+
+            _knob_active = [False]
+            def _knob_clicked():
+                if _knob_active[0]:
+                    _stop_background()
+                    _knob_lbl.setText("Start Listening")
+                    _knob_lbl.setStyleSheet(f"color: {_ACCENT}; font-size: 13px; font-weight: bold; background: transparent;")
+                    _knob_active[0] = False
+                else:
+                    _start_background()
+                    _knob_lbl.setText("Stop Listening")
+                    _knob_lbl.setStyleSheet("color: #c0392b; font-size: 13px; font-weight: bold; background: transparent;")
+                    _knob_active[0] = True
+            knob_btn.clicked.connect(_knob_clicked)
+
+            knob_row = QWidget()
+            knob_row.setStyleSheet("background: transparent;")
+            _knob_hl = QHBoxLayout(knob_row)
+            _knob_hl.setContentsMargins(8, 4, 8, 4)
+            _knob_hl.setSpacing(16)
+            _knob_hl.addWidget(knob_btn)
+            _knob_hl.addWidget(_knob_lbl)
+            _knob_hl.addStretch()
+            home_vl.addWidget(knob_row)
+            _update_controls()  # re-run now that knob_row is assigned
 
     # Transcript History
     for w in _section_label("Transcript History", "Recent voice commands you've spoken."):
@@ -1494,9 +1630,9 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
             ll_lbl.setAlignment(Qt.AlignCenter)
             load_vl.addWidget(ll_lbl)
 
-    load_title = QLabel("VERA")
+    load_title = QLabel("VERA+" if is_premium() else "VERA")
     load_title.setAlignment(Qt.AlignCenter)
-    load_title.setStyleSheet("font-size: 24px; font-weight: bold; color: #ffffff;")
+    load_title.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {_TITLE_COLOR};")
     load_vl.addWidget(load_title)
 
     load_sub = QLabel("Loading your workspace...")

@@ -588,7 +588,8 @@ def main() -> None:
                     QTimer.singleShot(0, self.hide)
 
     root = _VERAWindow()
-    root.setWindowTitle("VERA")
+    from license import is_premium as _is_premium
+    root.setWindowTitle("VERA+" if _is_premium() else "VERA")
     root.resize(620, 560)
     root.setMinimumSize(580, 460)
     try:

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.99
+- Added: PyArmor obfuscation — source code is now protected in all installer builds
+- Fixed: Dev-only files (smoke_test.py, sync_public.py, discord_post.py, etc.) no longer ship to users; old copies removed automatically on next install
+- Added: Premium UI identity — gold theme, deeper background, VERA+ title bar and home screen title, VERA+/PREMIUM TIER watermarks
+- Added: Premium knob control — replaces Start/Stop buttons in Hold to Talk and Toggle modes for premium users; click toggles listening state
+
 ## 0.98.0.1
 - Fixed: "type" and "send message" commands failing with "cannot import name KbController" — public build import was broken after sync
 
