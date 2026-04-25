@@ -38,11 +38,10 @@ _PREM_BG           = "#141414"
 _PREM_TITLE_COLOR  = "#c9a84c"
 
 
-# Premium home tab themes — display name → filename in data/assets/
-# Drop a new image in data/assets/ and add an entry here to expose it as a theme.
-_PREMIUM_THEMES: dict[str, str] = {
-    "Particle Network": "backgroun.png",
-    "Emerald": "backgroun2.png",
+# Premium home tab themes — display name → {bg, knob} filenames in data/assets/
+_PREMIUM_THEMES: dict[str, dict] = {
+    "Particle Network": {"bg": "backgroun.png",  "knob": "goldknob.png"},
+    "Emerald":          {"bg": "backgroun2.png", "knob": "emeraldknob.png"},
 }
 
 
@@ -536,37 +535,47 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     home_area, home_inner, home_vl = _scrollable_tab()
     tabs.addTab(home_area, "Home")
 
-    _bg_lbl_ref = [None]  # mutable ref so theme switcher can update it
+    _bg_lbl_ref   = [None]  # mutable ref so theme switcher can update background
+    _knob_btn_ref = [None]  # mutable ref so theme switcher can update knob image
 
     def _apply_home_theme(theme_name: str):
         import os as _os_bg
-        filename = _PREMIUM_THEMES.get(theme_name, "")
-        if not filename:
+        theme = _PREMIUM_THEMES.get(theme_name, {})
+        # --- background ---
+        bg_file = theme.get("bg", "")
+        if not bg_file:
             if _bg_lbl_ref[0]:
                 _bg_lbl_ref[0].setVisible(False)
-            return
-        _bg_path = _os_bg.path.join(_os_bg.path.dirname(_os_bg.path.abspath(__file__)), "data", "assets", filename)
-        px = QPixmap(_bg_path)
-        if px.isNull():
-            return
-        if _bg_lbl_ref[0] is None:
-            lbl = QLabel(home_inner)
-            lbl.setScaledContents(True)
-            lbl.lower()
-            lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
-            _bg_lbl_ref[0] = lbl
-            _orig_resize = home_inner.resizeEvent
-            def _home_resize(event, _lbl=lbl):
-                _lbl.setGeometry(0, 0, home_inner.width(), home_inner.height())
-                _orig_resize(event)
-            home_inner.resizeEvent = _home_resize
-        _bg_lbl_ref[0].setPixmap(px)
-        _bg_lbl_ref[0].setVisible(True)
-        _bg_lbl_ref[0].setGeometry(0, 0, home_inner.width(), home_inner.height())
+        else:
+            _bg_path = _os_bg.path.join(_os_bg.path.dirname(_os_bg.path.abspath(__file__)), "data", "assets", bg_file)
+            px = QPixmap(_bg_path)
+            if not px.isNull():
+                if _bg_lbl_ref[0] is None:
+                    lbl = QLabel(home_inner)
+                    lbl.setScaledContents(True)
+                    lbl.lower()
+                    lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
+                    _bg_lbl_ref[0] = lbl
+                    _orig_resize = home_inner.resizeEvent
+                    def _home_resize(event, _lbl=lbl):
+                        _lbl.setGeometry(0, 0, home_inner.width(), home_inner.height())
+                        _orig_resize(event)
+                    home_inner.resizeEvent = _home_resize
+                _bg_lbl_ref[0].setPixmap(px)
+                _bg_lbl_ref[0].setVisible(True)
+                _bg_lbl_ref[0].setGeometry(0, 0, home_inner.width(), home_inner.height())
+        # --- knob ---
+        knob_file = theme.get("knob", "")
+        if knob_file and _knob_btn_ref[0] is not None:
+            _knob_path = _os_bg.path.join(_os_bg.path.dirname(_os_bg.path.abspath(__file__)), "data", "assets", knob_file)
+            _knob_px = QPixmap(_knob_path)
+            if not _knob_px.isNull():
+                btn = _knob_btn_ref[0]
+                scaled = _knob_px.scaledToWidth(btn.width(), Qt.SmoothTransformation)
+                btn.setIcon(QIcon(scaled))
+                btn.setIconSize(scaled.size())
 
-    if is_premium():
-        _saved_theme = cfg.get("home_theme", "Particle Network")
-        _apply_home_theme(_saved_theme)
+    # Theme applied after knob is built — see below
 
     # Premium watermarks
     if is_premium():
@@ -644,86 +653,88 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     _update_controls()
     home_vl.addWidget(ctrl_card)
 
-    # Premium knob — centered in a full-width inset track bar
+    # Premium knob — pill image, full-width, swaps with theme
     knob_row = None
     if is_premium():
         import os as _os
-        _knob_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "data", "assets", "ptt_knob.png")
+        from PySide6.QtWidgets import QGraphicsOpacityEffect as _QOpacity
+        _saved_knob_theme = _PREMIUM_THEMES.get(cfg.get("home_theme", "Particle Network"), {})
+        _knob_file = _saved_knob_theme.get("knob", "goldknob.png")
+        _knob_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "data", "assets", _knob_file)
         _knob_px = QPixmap(_knob_path)
         if not _knob_px.isNull():
-            from PySide6.QtGui import QPainter as _QPainter, QTransform as _QTransform
-
-            _knob_size = 80
-            _knob_sized = _knob_px.scaled(_knob_size, _knob_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
-            def _make_knob_icon(angle: float) -> QIcon:
-                out = QPixmap(_knob_sized.size())
-                out.fill(Qt.transparent)
-                p = _QPainter(out)
-                p.setRenderHint(_QPainter.RenderHint.SmoothPixmapTransform)
-                cx, cy = _knob_sized.width() / 2, _knob_sized.height() / 2
-                t = _QTransform()
-                t.translate(cx, cy)
-                t.rotate(angle)
-                t.translate(-cx, -cy)
-                p.setTransform(t)
-                p.drawPixmap(0, 0, _knob_sized)
-                p.end()
-                return QIcon(out)
+            _pill_w = 320
+            _pill_scaled = _knob_px.scaledToWidth(_pill_w, Qt.SmoothTransformation)
+            _pill_h = _pill_scaled.height()
 
             knob_btn = QPushButton()
-            knob_btn.setFixedSize(_knob_size, _knob_size)
+            knob_btn.setFixedSize(_pill_w, _pill_h)
             knob_btn.setAttribute(Qt.WA_TranslucentBackground)
-            knob_btn.setIcon(_make_knob_icon(0))
-            knob_btn.setIconSize(QSize(_knob_size, _knob_size))
-            knob_btn.setStyleSheet(
-                "QPushButton { background: transparent; border: none; border-radius: %dpx; }"
-                "QPushButton:pressed { margin: 2px; }" % (_knob_size // 2)
-            )
+            knob_btn.setIcon(QIcon(_pill_scaled))
+            knob_btn.setIconSize(_pill_scaled.size())
+            knob_btn.setStyleSheet("QPushButton { background: transparent; border: none; }")
+            knob_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            _knob_btn_ref[0] = knob_btn
 
-            # Side labels
-            _lbl_ss = (
-                "QPushButton {{ background: transparent; border: none;"
-                " color: {fg}; font-size: 11px; font-weight: bold; padding: 4px 8px; }}"
-                "QPushButton:hover {{ color: {hover}; }}"
-            )
-            _start_btn = QPushButton("Start\nListening")
-            _start_btn.setStyleSheet(_lbl_ss.format(fg="#888888", hover=_ACCENT))
-            _start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            _start_btn.setFixedWidth(80)
+            _knob_opacity = _QOpacity()
+            _knob_opacity.setOpacity(1.0)
+            knob_btn.setGraphicsEffect(_knob_opacity)
 
-            _stop_btn = QPushButton("Stop\nListening")
-            _stop_btn.setStyleSheet(_lbl_ss.format(fg="#888888", hover="#c0392b"))
-            _stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            _stop_btn.setFixedWidth(80)
+            # Labels overlaid on the black panels of the pill
+            # Pill is 320px wide. Knob center occupies ~middle 100px.
+            # Left panel: x=0 to ~110, right panel: x=~210 to 320
+            _lbl_style_active  = "background: transparent; color: %s; font-size: 10px; font-weight: bold;" % _ACCENT
+            _lbl_style_muted   = "background: transparent; color: #888888; font-size: 10px; font-weight: bold;"
+            _lbl_style_stop    = "background: transparent; color: #c0392b; font-size: 10px; font-weight: bold;"
+
+            _start_lbl = QLabel("Start\nListening", knob_btn)
+            _start_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            _start_lbl.setStyleSheet(_lbl_style_active)
+            _start_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
+            _start_lbl.setGeometry(0, 0, 110, _pill_h)
+
+            _stop_lbl = QLabel("Stop\nListening", knob_btn)
+            _stop_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            _stop_lbl.setStyleSheet(_lbl_style_muted)
+            _stop_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
+            _stop_lbl.setGeometry(_pill_w - 110, 0, 110, _pill_h)
 
             def _on_start():
                 _start_background()
-                knob_btn.setIcon(_make_knob_icon(-120))
-                _start_btn.setStyleSheet(_lbl_ss.format(fg=_ACCENT, hover=_ACCENT))
-                _stop_btn.setStyleSheet(_lbl_ss.format(fg="#888888", hover="#c0392b"))
+                _knob_opacity.setOpacity(1.0)
+                _start_lbl.setStyleSheet(_lbl_style_active)
+                _stop_lbl.setStyleSheet(_lbl_style_muted)
 
             def _on_stop():
                 _stop_background()
-                knob_btn.setIcon(_make_knob_icon(60))
-                _stop_btn.setStyleSheet(_lbl_ss.format(fg="#c0392b", hover="#c0392b"))
-                _start_btn.setStyleSheet(_lbl_ss.format(fg="#888888", hover=_ACCENT))
+                _knob_opacity.setOpacity(0.55)
+                _stop_lbl.setStyleSheet(_lbl_style_stop)
+                _start_lbl.setStyleSheet(_lbl_style_muted)
 
-            _start_btn.clicked.connect(_on_start)
-            _stop_btn.clicked.connect(_on_stop)
+            _listening = [False]
+            def _pill_clicked():
+                if not _listening[0]:
+                    _on_start()
+                    _listening[0] = True
+                else:
+                    _on_stop()
+                    _listening[0] = False
+            knob_btn.clicked.connect(_pill_clicked)
 
             knob_row = QWidget()
             knob_row.setStyleSheet("background: transparent;")
             _knob_hl = QHBoxLayout(knob_row)
             _knob_hl.setContentsMargins(0, 8, 0, 8)
-            _knob_hl.setSpacing(16)
             _knob_hl.addStretch()
-            _knob_hl.addWidget(_start_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
             _knob_hl.addWidget(knob_btn)
-            _knob_hl.addWidget(_stop_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
             _knob_hl.addStretch()
+
             home_vl.addWidget(knob_row)
             _update_controls()  # re-run now that knob_row is assigned
+
+    # Apply theme now that both bg label and knob button exist
+    if is_premium():
+        _apply_home_theme(cfg.get("home_theme", "Particle Network"))
 
     # Transcript History
     for w in _section_label("Transcript History", "Recent voice commands you've spoken."):
