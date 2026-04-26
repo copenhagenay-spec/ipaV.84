@@ -2,6 +2,9 @@
 
 ## 0.99.5
 - Added: About tab — shows version number and Forjem Software LLC copyright; info icon in sidebar rail; card follows active theme
+- Added: Installer banner — custom branded sidebar image with VERA logo and Forjem Software LLC copyright
+- Added: EULA — license agreement page added to installer with "I Agree" step
+- Added: Install progress — progress bar now builds meaningfully through each install step with step count labels
 - Fixed: "What can I say" / "Show help" now opens correctly and shows the VERA icon in the title bar
 - Fixed: Help dialog window stays open — was being garbage collected immediately after opening
 
