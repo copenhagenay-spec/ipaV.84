@@ -101,6 +101,14 @@ def _get_kokoro_models_dir() -> str:
     return os.path.join(os.path.dirname(__file__), "data", "models")
 
 
+def _release_kokoro():
+    """Unload the Kokoro model from memory. Reloads on next TTS call."""
+    global _kokoro_instance
+    import gc
+    _kokoro_instance = None
+    gc.collect()
+
+
 def _get_kokoro():
     """Lazy-init kokoro-onnx — loads model files on first call."""
     global _kokoro_instance
@@ -132,9 +140,13 @@ def _kokoro_tts_play(text: str) -> None:
         import sounddevice as sd  # type: ignore
         kokoro = _get_kokoro()
         voice = load_config().get("tts_voice", _VERA_KOKORO_VOICE_DEFAULT)
+        device = _get_tts_device()
         samples, sample_rate = kokoro.create(text, voice=voice, speed=1.0, lang="en-us")
-        sd.play(samples, samplerate=sample_rate)
-        sd.wait()
+        channels = 1 if samples.ndim == 1 else samples.shape[1]
+        flat = samples.reshape(-1, channels)
+        with sd.OutputStream(samplerate=int(sample_rate), channels=channels,
+                             dtype="float32", device=device) as stream:
+            stream.write(flat)
     except Exception as e:
         _log_event(f"TTS_KOKORO_ERROR: {e}")
         # Fallback to pyttsx3
@@ -190,17 +202,7 @@ def _tts_speak(text: str, bypass_mute: bool = False) -> bool:
 
 def _kokoro_tts_play_device(text: str) -> None:
     """Play TTS through the configured voice output device (for read out command only)."""
-    try:
-        import sounddevice as sd
-        kokoro = _get_kokoro()
-        voice = load_config().get("tts_voice", _VERA_KOKORO_VOICE_DEFAULT)
-        samples, sample_rate = kokoro.create(text, voice=voice, speed=1.0, lang="en-us")
-        device = _get_tts_device()
-        sd.play(samples, samplerate=sample_rate, device=device)
-        sd.wait()
-    except Exception as e:
-        _log_event(f"TTS_DEVICE_ERROR: {e}")
-        _kokoro_tts_play(text)
+    _kokoro_tts_play(text)
 
 
 def _tts_speak_to_device(text: str) -> bool:
@@ -1476,10 +1478,10 @@ def _ask_ai(question: str) -> bool:
 
     today = time.strftime("%B %d, %Y")
     now = time.strftime("%I:%M %p")
-    prompt = (
-        f"Today's date is {today} and the current time is {now}.\n\n"
-        f"{question.strip()}\n\n"
-        "Answer in 2 to 3 sentences maximum. Be direct and concise."
+    system_prompt = (
+        f"Today's date is {today} and the current time is {now}. "
+        "Answer in 2 to 3 sentences maximum. Be direct and concise. "
+        "No markdown, no lists, no formatting."
     )
 
     def _run():
@@ -1487,6 +1489,7 @@ def _ask_ai(question: str) -> bool:
             import json
             import urllib.request
             import urllib.error
+            from llm import _get_history, append_exchange
 
             if api_key.startswith("sk-ant-"):
                 # Anthropic / Claude
@@ -1494,7 +1497,8 @@ def _ask_ai(question: str) -> bool:
                 body = json.dumps({
                     "model": "claude-haiku-4-5-20251001",
                     "max_tokens": 150,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "system": system_prompt,
+                    "messages": [*_get_history(), {"role": "user", "content": question.strip()}],
                 }).encode("utf-8")
                 req = urllib.request.Request(
                     url,
@@ -1519,7 +1523,11 @@ def _ask_ai(question: str) -> bool:
                 url = "https://api.openai.com/v1/chat/completions"
                 body = json.dumps({
                     "model": "gpt-4o-mini",
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        *_get_history(),
+                        {"role": "user", "content": question.strip()},
+                    ],
                     "max_tokens": 150,
                 }).encode("utf-8")
                 req = urllib.request.Request(
@@ -1545,7 +1553,11 @@ def _ask_ai(question: str) -> bool:
                 url = "https://api.groq.com/openai/v1/chat/completions"
                 body = json.dumps({
                     "model": "llama-3.3-70b-versatile",
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        *_get_history(),
+                        {"role": "user", "content": question.strip()},
+                    ],
                     "max_tokens": 150,
                 }).encode("utf-8")
                 req = urllib.request.Request(
@@ -1571,6 +1583,7 @@ def _ask_ai(question: str) -> bool:
                 _tts_speak("I didn't get a response from the AI.")
                 return
             _log_event(f"ASK_AI: {question} -> {answer}")
+            append_exchange(question.strip(), answer)
             _tts_speak(answer)
         except urllib.error.HTTPError as exc:
             try:
@@ -1905,6 +1918,9 @@ def _ih_gaming_mode_on(m, t, allow_prompt, confirm_fn, restart_fn):
     if fn:
         fn(True)
     _tts_speak("Gaming mode on.")
+    from app import release_whisper_model
+    release_whisper_model()
+    _release_kokoro()
     return True
 
 

@@ -10,5 +10,4 @@ pycaw
 kokoro-onnx
 soundfile
 requests
-pypresence
 rapidfuzz

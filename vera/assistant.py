@@ -22,7 +22,7 @@ from PySide6.QtCore import Qt, QTimer, QObject, Signal, QEvent
 from PySide6.QtGui import QIcon, QCloseEvent
 
 import ui
-import wizard
+import tour
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +139,23 @@ class BackgroundListener:
         self.stop_event = threading.Event()
         self.recording_flag = threading.Event()
 
+    def _elevate_listener_priority(self):
+        """Set the pynput hook thread to THREAD_PRIORITY_HIGHEST.
+        WH_KEYBOARD_LL requires the hook thread to respond within ~200ms or
+        Windows skips it — under game load this causes system-wide input lag."""
+        import ctypes
+        THREAD_PRIORITY_HIGHEST = 2
+        THREAD_QUERY_SET_INFORMATION = 0x0060
+        try:
+            tid = self.listener.ident
+            if tid:
+                handle = ctypes.windll.kernel32.OpenThread(THREAD_QUERY_SET_INFORMATION, False, tid)
+                if handle:
+                    ctypes.windll.kernel32.SetThreadPriority(handle, THREAD_PRIORITY_HIGHEST)
+                    ctypes.windll.kernel32.CloseHandle(handle)
+        except Exception:
+            pass
+
     def stop(self):
         self.stop_event.set()
         if hasattr(self, "_poll_stop"):
@@ -198,6 +215,7 @@ class BackgroundListener:
         self.mode = "toggle"
         self.listener = keyboard.Listener(on_press=_on_press)
         self.listener.start()
+        self._elevate_listener_priority()
 
     def start_hold(self, hold_key: str, model_path: str, confirm_fn, on_text=None, restart_fn=None, on_record_start=None, on_record_end=None):
         from pynput import keyboard  # type: ignore
@@ -308,55 +326,49 @@ class BackgroundListener:
             self.listener.start()
 
         else:
-            key_obj = _resolve_hold_key(hold_key, keyboard)
-            if not key_obj:
+            # GetAsyncKeyState polling — no WH_KEYBOARD_LL hook, so no system-wide
+            # keyboard freeze under heavy game CPU load.
+            vk = _key_name_to_vk(hold_key)
+            if not vk:
                 raise ValueError("Invalid hold key")
 
-            # Caps Lock suppression — local only, never pushed to public build
-            _caps_desired = {"state": None}
+            import ctypes as _ctypes
+            _KEYEVENTF_KEYUP = 0x0002
+            _is_toggle_key = vk in (0x14, 0x90, 0x91)  # caps_lock, num_lock, scroll_lock
+            _poll_stop = threading.Event()
             _kb_released = {"done": False}
-            _restoring_caps = {"active": False}
 
-            def _on_press(key):
-                if key == key_obj and not self.recording_flag.is_set() and not _restoring_caps["active"]:
-                    if key == keyboard.Key.caps_lock:
-                        try:
-                            import ctypes
-                            current = ctypes.windll.user32.GetKeyState(0x14) & 0x0001
-                            _caps_desired["state"] = 0 if current else 1
-                        except Exception:
-                            pass
-                    _kb_released["done"] = False
-                    self.recording_flag.set()
-                    self.stop_event.clear()
-                    threading.Thread(target=_record, daemon=True).start()
-                    self._play_ptt_beep(660)
-
-            def _on_release(key):
-                if key == key_obj and self.recording_flag.is_set() and not _kb_released["done"] and not _restoring_caps["active"]:
-                    _kb_released["done"] = True
-                    self._play_ptt_beep(440)
-                    self.stop_event.set()
-                    if key == keyboard.Key.caps_lock and _caps_desired["state"] is not None:
-                        desired = _caps_desired["state"]
-                        def _restore():
-                            import time as _time
-                            import ctypes as _ctypes
-                            _time.sleep(0.15)
-                            current = _ctypes.windll.user32.GetKeyState(0x14) & 0x0001
-                            if current != desired:
-                                _restoring_caps["active"] = True
-                                _ctypes.windll.user32.keybd_event(0x14, 0, 0, 0)
-                                _ctypes.windll.user32.keybd_event(0x14, 0, 2, 0)
-                                _time.sleep(0.1)
-                                _restoring_caps["active"] = False
-                        threading.Thread(target=_restore, daemon=True).start()
-                        _caps_desired["state"] = None
+            def _kb_poll():
+                prev_pressed = False
+                while not _poll_stop.is_set():
+                    pressed = bool(_ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000)
+                    if pressed and not prev_pressed:
+                        if not self.recording_flag.is_set():
+                            _kb_released["done"] = False
+                            self.recording_flag.set()
+                            self.stop_event.clear()
+                            threading.Thread(target=_record, daemon=True).start()
+                            self._play_ptt_beep(660)
+                    elif not pressed and prev_pressed:
+                        if self.recording_flag.is_set() and not _kb_released["done"]:
+                            _kb_released["done"] = True
+                            self._play_ptt_beep(440)
+                            self.stop_event.set()
+                        if _is_toggle_key:
+                            # Correction fires after physical release — synthetic
+                            # press+release completes in microseconds, well under the
+                            # 10ms poll interval, so GetAsyncKeyState never sees it
+                            _ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
+                            _ctypes.windll.user32.keybd_event(vk, 0, _KEYEVENTF_KEYUP, 0)
+                    prev_pressed = pressed
+                    time.sleep(0.01)
 
             self.stop()
             self.mode = "hold"
-            self.listener = keyboard.Listener(on_press=_on_press, on_release=_on_release)
-            self.listener.start()
+            self._poll_stop = _poll_stop
+            _poll_thread = threading.Thread(target=_kb_poll, daemon=True)
+            _poll_thread.start()
+            self.listener = _poll_thread
 
 
 def _resolve_hold_key(key_name: str, keyboard):
@@ -371,6 +383,36 @@ def _resolve_hold_key(key_name: str, keyboard):
         return getattr(keyboard.Key, raw)
     except Exception:
         return None
+
+
+def _key_name_to_vk(key_name: str):
+    """Convert a key name string to a Windows virtual key code for GetAsyncKeyState."""
+    import ctypes
+    raw = str(key_name).strip().lower()
+    if raw.startswith("<") and raw.endswith(">"):
+        raw = raw[1:-1].strip()
+    _special = {
+        "caps_lock": 0x14, "shift": 0x10, "ctrl": 0x11, "alt": 0x12,
+        "space": 0x20, "tab": 0x09, "enter": 0x0D, "return": 0x0D,
+        "backspace": 0x08, "escape": 0x1B, "esc": 0x1B,
+        "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73,
+        "f5": 0x74, "f6": 0x75, "f7": 0x76, "f8": 0x77,
+        "f9": 0x78, "f10": 0x79, "f11": 0x7A, "f12": 0x7B,
+        "insert": 0x2D, "delete": 0x2E, "home": 0x24, "end": 0x23,
+        "page_up": 0x21, "page_down": 0x22,
+        "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
+        "num_lock": 0x90, "scroll_lock": 0x91, "pause": 0x13,
+        "left_shift": 0xA0, "right_shift": 0xA1,
+        "left_ctrl": 0xA2, "right_ctrl": 0xA3,
+        "left_alt": 0xA4, "right_alt": 0xA5,
+    }
+    if raw in _special:
+        return _special[raw]
+    if len(raw) == 1:
+        vk = ctypes.windll.user32.VkKeyScanW(ord(raw))
+        if vk != -1:
+            return vk & 0xFF
+    return None
 
 
 def _is_mouse_button(key_name: str) -> bool:
@@ -513,48 +555,16 @@ def main() -> None:
         except Exception:
             pass
 
-    # --- Discord Rich Presence ---
-    _RPC_CLIENT_ID = "1484663083438837801"
-    _rpc = {"conn": None, "start": int(time.time())}
-
-    def _rpc_connect():
-        try:
-            from pypresence import Presence
-            rpc = Presence(_RPC_CLIENT_ID)
-            rpc.connect()
-            _rpc["conn"] = rpc
-            _rpc["start"] = int(time.time())
-            _rpc_set("Standing by")
-        except Exception:
-            pass
-
-    def _rpc_set(state: str):
-        if not _rpc["conn"]:
-            return
-        try:
-            _rpc["conn"].update(
-                details="Voice assistant",
-                state=state,
-                start=_rpc["start"],
-            )
-        except Exception:
-            _rpc["conn"] = None
-
-    def _rpc_close():
-        if _rpc["conn"]:
-            try:
-                _rpc["conn"].close()
-            except Exception:
-                pass
-            _rpc["conn"] = None
-
-    threading.Thread(target=_rpc_connect, daemon=True).start()
 
     _test_update_alert = "--test-update-alert" in sys.argv
 
     cfg = load_config()
-    if cfg and "wizard_done" not in cfg:
-        cfg["wizard_done"] = True
+
+    # Migrate separate hotkey/hold_key → unified ptt_key
+    if cfg and "ptt_key" not in cfg:
+        cfg["ptt_key"] = _normalize_record_key_name(
+            cfg.get("hold_key") or cfg.get("hotkey") or HOLD_CHOICES[0]
+        )
         save_config(cfg)
 
     if cfg:
@@ -606,10 +616,8 @@ def main() -> None:
     mode = SimpleVar(value=_saved_mode)
     language = SimpleVar(value=cfg.get("language", "English"))
     seconds = SimpleVar(value=str(cfg.get("seconds", 5)))
-    hotkey = SimpleVar(value=_normalize_record_key_name(cfg.get("hotkey", HOTKEY_CHOICES[0])))
-    holdkey = SimpleVar(value=_normalize_record_key_name(cfg.get("hold_key", HOLD_CHOICES[0])))
-    hotkey_display = SimpleVar(value=_format_record_key_name(hotkey.get()))
-    holdkey_display = SimpleVar(value=_format_record_key_name(holdkey.get()))
+    ptt_key = SimpleVar(value=_normalize_record_key_name(cfg.get("ptt_key", HOLD_CHOICES[0])))
+    ptt_key_display = SimpleVar(value=_format_record_key_name(ptt_key.get()))
     search_engine = SimpleVar(
         value=cfg.get("search_engine", "https://www.google.com/search?q={query}")
     )
@@ -770,8 +778,7 @@ def main() -> None:
         display_var.trace_add("write", _sync_from_display)
         _sync_from_raw()
 
-    _bind_record_key_display(hotkey, hotkey_display)
-    _bind_record_key_display(holdkey, holdkey_display)
+    _bind_record_key_display(ptt_key, ptt_key_display)
     apps_textbox = None
     aliases_textbox = None
     actions_textbox = None
@@ -792,6 +799,8 @@ def main() -> None:
     _update_action = {"callback": None}
     _dismissed_update_version = {"value": str(cfg.get("dismissed_update_version", "")).strip()}
     save_button = None
+    revert_button = None
+    _ui_refresh_fn = None
     notice_frame = None
     notice_label = None
     notice_action_button = None
@@ -820,7 +829,7 @@ def main() -> None:
         # faster-whisper auto-downloads on first use — always report ready
         return True
 
-    def _build_config(wizard_done: bool | None = None) -> dict:
+    def _build_config() -> dict:
         try:
             secs = int(seconds.get())
             if secs <= 0:
@@ -829,11 +838,11 @@ def main() -> None:
             secs = 5
         data = {
             "theme": "dark",
+            "home_theme": load_config().get("home_theme", "Particle Network"),
             "mode": mode.get(),
             "language": language.get(),
             "seconds": secs,
-            "hotkey": hotkey.get(),
-            "hold_key": holdkey.get(),
+            "ptt_key": ptt_key.get(),
             "search_engine": search_engine.get().strip(),
             "ptt_beep_volume": int(ptt_beep_volume.get()),
             "tts_output_device": "" if tts_output_device.get() == "Default" else tts_output_device.get(),
@@ -869,8 +878,6 @@ def main() -> None:
             "premium_onboarding_shown": bool(cfg.get("premium_onboarding_shown", False)),
             "license_key": cfg.get("license_key", ""),
         }
-        if wizard_done is not None:
-            data["wizard_done"] = bool(wizard_done)
         return data
 
     def _config_signature(data: dict | None = None) -> str:
@@ -890,7 +897,6 @@ def main() -> None:
                     tray_icon["icon"].stop()
             except Exception:
                 pass
-            _rpc_close()
             _release_mutex()
             script_path = os.path.abspath(__file__)
             subprocess.Popen([sys.executable, script_path])
@@ -1330,6 +1336,103 @@ def main() -> None:
         _refresh_save_prompt()
         _notify_info("Saved", "Configuration saved.")
 
+    def _revert():
+        saved = load_config()
+        _saved_mode = saved.get("mode", "hold")
+        if _saved_mode == "mic":
+            _saved_mode = "hold"
+        mode.set(_saved_mode)
+        language.set(saved.get("language", "English"))
+        seconds.set(str(saved.get("seconds", 5)))
+        ptt_key.set(_normalize_record_key_name(saved.get("ptt_key", HOLD_CHOICES[0])))
+        search_engine.set(saved.get("search_engine", "https://www.google.com/search?q={query}"))
+        ptt_beep_volume.set(int(saved.get("ptt_beep_volume", 80)))
+        font_scale.set(saved.get("font_scale", "Normal"))
+        tts_output_device.set(saved.get("tts_output_device", "") or "Default")
+        tts_voice.set(saved.get("tts_voice", "af_heart"))
+        personality_mode.set(saved.get("personality_mode", "default"))
+        overlay_position.set(saved.get("overlay_position", "Top Left"))
+        overlay_hotkey.set(saved.get("overlay_hotkey", ""))
+        joy_ptt_button.set(saved.get("joy_ptt_button", ""))
+        confirm_actions.set(bool(saved.get("confirm_actions", False)))
+        idle_chatter.set(bool(saved.get("idle_chatter", True)))
+        spotify_media.set(bool(saved.get("spotify_media", False)))
+        spotify_requires.set(bool(saved.get("spotify_requires_keyword", False)))
+        spotify_keywords.set(str(saved.get("spotify_keywords", "spotify")))
+        news_source.set(saved.get("news_source", "BBC"))
+        birthday_month.set(str(saved.get("birthday_month", "") or ""))
+        birthday_day.set(str(saved.get("birthday_day", "") or ""))
+        discord_bot_token_var.set(saved.get("discord_bot_token", ""))
+        discord_server_id_var.set(saved.get("discord_server_id", ""))
+        gemini_api_key_var.set(saved.get("gemini_api_key", ""))
+        bug_report_secret_var.set(saved.get("bug_report_secret", "") or "Z3JlZW5pc2RheQ==")
+
+        saved_actions = saved.get("actions", [])
+        if not isinstance(saved_actions, list):
+            saved_actions = []
+        actions[:] = [
+            {"phrase": str(a.get("phrase", "")).strip(), "command": str(a.get("command", "")).strip()}
+            for a in saved_actions if isinstance(a, dict)
+        ]
+
+        apps_cfg = saved.get("apps", {})
+        apps[:] = []
+        if isinstance(apps_cfg, dict):
+            for name, command in apps_cfg.items():
+                apps.append({"name": str(name).lower(), "command": str(command)})
+
+        aliases_cfg = saved.get("app_aliases", {})
+        aliases[:] = []
+        if isinstance(aliases_cfg, dict):
+            for alias, target in aliases_cfg.items():
+                aliases.append({"alias": str(alias).lower(), "target": str(target).lower()})
+
+        discord_cfg = saved.get("discord_channels", {})
+        discord_channels[:] = []
+        if isinstance(discord_cfg, dict):
+            for name, url in discord_cfg.items():
+                discord_channels.append({"name": str(name).lower(), "url": str(url), "server": ""})
+        elif isinstance(discord_cfg, list):
+            for ch in discord_cfg:
+                if isinstance(ch, dict) and ch.get("name") and ch.get("url"):
+                    discord_channels.append({
+                        "name": str(ch.get("name", "")).strip().lower(),
+                        "url": str(ch.get("url", "")).strip(),
+                        "server": str(ch.get("server", "")).strip().lower(),
+                    })
+
+        discord_servers_cfg = saved.get("discord_servers", [])
+        discord_servers[:] = []
+        if isinstance(discord_servers_cfg, list):
+            for s in discord_servers_cfg:
+                if isinstance(s, dict) and s.get("nickname"):
+                    discord_servers.append({
+                        "nickname": str(s.get("nickname", "")).strip().lower(),
+                        "server_id": str(s.get("server_id", "")).strip(),
+                    })
+
+        saved_keybinds = saved.get("keybinds", [])
+        if not isinstance(saved_keybinds, list):
+            saved_keybinds = []
+        keybinds[:] = [
+            {
+                "phrase": str(k.get("phrase", "")).strip().lower(),
+                "key": str(k.get("key", "")).strip(),
+                "count": int(k.get("count", 1)),
+            }
+            for k in saved_keybinds if isinstance(k, dict)
+        ]
+
+        _refresh_actions()
+        _refresh_apps()
+        _refresh_aliases()
+        _refresh_discord_channels()
+        _refresh_discord_servers()
+        _refresh_keybinds()
+        if callable(_ui_refresh_fn):
+            _ui_refresh_fn()
+        _refresh_save_prompt()
+
     def _prime_speech_model() -> None:
         if _model_preload_started["done"]:
             return
@@ -1455,7 +1558,7 @@ def main() -> None:
 
     def _show_ui_info(title: str, message: str) -> None:
         prefix = f"{title}: " if title and title.lower() != "info" else ""
-        _show_inline_notice(prefix + message, tone="info", duration_ms=5000)
+        _show_inline_notice(prefix + message, tone="info", duration_ms=5000, closable=True)
 
     def _show_ui_error(title: str, message: str) -> None:
         prefix = f"{title}: " if title else ""
@@ -1567,6 +1670,8 @@ def main() -> None:
             return
         is_dirty = _config_signature() != _saved_config_signature[0]
         save_button.setVisible(is_dirty)
+        if revert_button is not None:
+            revert_button.setVisible(is_dirty)
 
     global UI_NOTIFY_INFO, UI_NOTIFY_ERROR, UI_CONFIRM
     UI_NOTIFY_INFO = _show_ui_info
@@ -1955,32 +2060,6 @@ def main() -> None:
         _refresh_keybinds()
         _refresh_save_prompt()
 
-    def _import_steam():
-        try:
-            found = find_steam_apps()
-        except Exception as exc:
-            _notify_error("Steam Import Error", str(exc))
-            return
-        if not found:
-            _notify_info("Steam Import", "No Steam apps found.")
-            return
-        existing = {a.get("name") for a in apps}
-        added = 0
-        for app in found:
-            name = app.get("name", "").strip().lower()
-            appid = app.get("appid")
-            if not name or not appid:
-                continue
-            if name in existing:
-                continue
-            command = f"start steam://run/{appid}"
-            apps.append({"name": name, "command": command})
-            existing.add(name)
-            added += 1
-        _refresh_apps()
-        _refresh_save_prompt()
-        _notify_info("Steam Import", f"Added {added} apps.")
-
     def _run_now():
         try:
             secs = int(seconds.get())
@@ -2038,15 +2117,15 @@ def main() -> None:
         try:
             if mode.get() == "hold":
                 _runtime_mode["value"] = "hold"
-                _hold_label = f"Listening (hold {holdkey.get()})"
+                _hold_label = f"Listening (hold {ptt_key.get()})"
                 listener.start_hold(
-                    holdkey.get(),
+                    ptt_key.get(),
                     model_path=_model_dir(),
                     confirm_fn=_confirm_prompt,
                     on_text=lambda t: _bridge.post(lambda _t=t: _update_transcript(_t)),
                     restart_fn=_do_restart,
-                    on_record_start=lambda: (_bridge.post(lambda: status_var.set("Recording...")), _rpc_set("Recording...")),
-                    on_record_end=lambda: (_bridge.post(lambda: status_var.set(_hold_label)), _rpc_set("Listening...")),
+                    on_record_start=lambda: _bridge.post(lambda: status_var.set("Recording...")),
+                    on_record_end=lambda: _bridge.post(lambda: status_var.set(_hold_label)),
                 )
                 # Secondary PTT — runs alongside primary PTT if configured (any key, mouse, or joystick)
                 _joy_key = joy_ptt_button.get()
@@ -2058,27 +2137,37 @@ def main() -> None:
                             confirm_fn=_confirm_prompt,
                             on_text=lambda t: _bridge.post(lambda _t=t: _update_transcript(_t)),
                             restart_fn=_do_restart,
-                            on_record_start=lambda: (_bridge.post(lambda: status_var.set("Recording...")), _rpc_set("Recording...")),
-                            on_record_end=lambda: (_bridge.post(lambda: status_var.set(_hold_label)), _rpc_set("Listening...")),
+                            on_record_start=lambda: _bridge.post(lambda: status_var.set("Recording...")),
+                            on_record_end=lambda: _bridge.post(lambda: status_var.set(_hold_label)),
                         )
                     except Exception:
                         pass
                 status_var.set(_hold_label)
-                _rpc_set("Listening...")
             elif mode.get() == "toggle":
                 _runtime_mode["value"] = "toggle"
-                _toggle_label = f"Listening (toggle {hotkey.get()})"
+                _key = ptt_key.get()
+                from pynput import keyboard as _kb_check  # type: ignore
+                _key_invalid = _is_mouse_button(_key) or _is_joy_button(_key) or not _resolve_hold_key(_key, _kb_check)
+                if _key_invalid:
+                    _fallback = "caps_lock"
+                    ptt_key.set(_fallback)
+                    _bridge.post(lambda _f=_fallback: _show_inline_notice(
+                        f"Toggle mode needs a keyboard key — switched PTT key to {_f}. "
+                        "Record a different key in Settings if needed.",
+                        tone="info", duration_ms=8000, closable=True,
+                    ))
+                    _key = _fallback
+                _toggle_label = f"Listening (toggle {_key})"
                 listener.start_toggle(
-                    hotkey.get(),
+                    _key,
                     model_path=_model_dir(),
                     confirm_fn=_confirm_prompt,
                     on_text=lambda t: _bridge.post(lambda _t=t: _update_transcript(_t)),
                     restart_fn=_do_restart,
-                    on_record_start=lambda: (_bridge.post(lambda: status_var.set("Recording...")), _rpc_set("Recording...")),
-                    on_record_end=lambda: (_bridge.post(lambda: status_var.set(_toggle_label)), _rpc_set("Listening...")),
+                    on_record_start=lambda: _bridge.post(lambda: status_var.set("Recording...")),
+                    on_record_end=lambda: _bridge.post(lambda: status_var.set(_toggle_label)),
                 )
                 status_var.set(_toggle_label)
-                _rpc_set("Listening...")
             elif mode.get() == "wake":
                 _runtime_mode["value"] = "wake"
                 _start_wake_word()
@@ -2112,9 +2201,9 @@ def main() -> None:
             else:
                 m = _runtime_mode.get("value", "idle")
                 if m == "hold":
-                    status_var.set(f"Listening (hold {holdkey.get()})")
+                    status_var.set(f"Listening (hold {ptt_key.get()})")
                 elif m == "toggle":
-                    status_var.set(f"Listening (toggle {hotkey.get()})")
+                    status_var.set(f"Listening (toggle {ptt_key.get()})")
                 elif m == "wake":
                     status_var.set("Wake word active (say 'vera')")
                 else:
@@ -2125,6 +2214,9 @@ def main() -> None:
         """Called by skills when gaming mode is toggled."""
         def _do():
             if active:
+                fn = _video_ctrl.get("pause")
+                if fn:
+                    fn()
                 status_var.set("Gaming Mode")
                 def _hold_gaming():
                     from skills import _gaming_mode as _gm
@@ -2133,11 +2225,14 @@ def main() -> None:
                         QTimer.singleShot(500, _hold_gaming)
                 QTimer.singleShot(500, _hold_gaming)
             else:
+                fn = _video_ctrl.get("resume")
+                if fn:
+                    fn()
                 m = _runtime_mode.get("value", "idle")
                 if m == "hold":
-                    status_var.set(f"Listening (hold {holdkey.get()})")
+                    status_var.set(f"Listening (hold {ptt_key.get()})")
                 elif m == "toggle":
-                    status_var.set(f"Listening (toggle {hotkey.get()})")
+                    status_var.set(f"Listening (toggle {ptt_key.get()})")
                 elif m == "wake":
                     status_var.set("Wake word active (say 'vera')")
                 else:
@@ -2296,33 +2391,6 @@ def main() -> None:
         cfg["custom_wake_phrase"] = phrase
         save_config(cfg)
 
-    # --- Setup Wizard ---
-    def _run_wizard():
-        state = {
-            "mode": mode,
-            "language": language,
-            "seconds": seconds,
-            "hotkey": hotkey,
-            "holdkey": holdkey,
-            "hotkey_display": hotkey_display,
-            "holdkey_display": holdkey_display,
-            "spotify_media": spotify_media,
-            "spotify_requires": spotify_requires,
-        }
-        callbacks = {
-            "model_present": _model_present,
-            "record_hotkey": _record_hotkey,
-            "record_hold_key": _record_hold_key,
-            "import_steam": _import_steam,
-            "build_config": _build_config,
-            "save_config": save_config,
-            "start_background": _start_background,
-        }
-        constants = {
-            "HOTKEY_CHOICES": HOTKEY_CHOICES,
-            "LANG_CHOICES": LANG_CHOICES,
-        }
-        wizard.run_wizard(root, state, callbacks, constants, {})
     # --- System Tray ---
     def _create_tray_icon():
         try:
@@ -2352,7 +2420,6 @@ def main() -> None:
 
         def _exit_app(_=None):
             try:
-                _rpc_close()
                 listener.stop()
                 if tray_icon["icon"] is not None:
                     tray_icon["icon"].stop()
@@ -2367,7 +2434,6 @@ def main() -> None:
                 listener.stop()
                 if tray_icon["icon"] is not None:
                     tray_icon["icon"].stop()
-                _rpc_close()
                 _release_mutex()
                 script_path = os.path.abspath(__file__)
                 subprocess.Popen([sys.executable, script_path])
@@ -2636,10 +2702,8 @@ def main() -> None:
         "mode": mode,
         "language": language,
         "seconds": seconds,
-        "hotkey": hotkey,
-        "holdkey": holdkey,
-        "hotkey_display": hotkey_display,
-        "holdkey_display": holdkey_display,
+        "ptt_key": ptt_key,
+        "ptt_key_display": ptt_key_display,
         "search_engine": search_engine,
         "confirm_actions": confirm_actions,
         "idle_chatter": idle_chatter,
@@ -2702,7 +2766,6 @@ def main() -> None:
         "add_app": _add_app,
         "remove_app": _remove_app,
         "test_app": _test_app,
-        "import_steam": _import_steam,
         "add_alias": _add_alias,
         "remove_alias": _remove_alias,
         "add_action": _add_action,
@@ -2723,6 +2786,7 @@ def main() -> None:
         "add_macro": _add_macro,
         "remove_macro": _remove_macro,
         "set_custom_wake_phrase": _set_custom_wake_phrase,
+        "revert": _revert,
     }
 
     constants = {
@@ -2731,6 +2795,9 @@ def main() -> None:
         "install_path": os.path.dirname(os.path.abspath(__file__)),
         "FONT_SCALE_CHOICES": ui.FONT_SCALE_CHOICES,
     }
+
+    _video_ctrl = {"pause": None, "resume": None}
+    state["video_ctrl"] = _video_ctrl
 
     widgets = ui.build_ui(window=root, state=state, callbacks=callbacks_ui, constants=constants)
 
@@ -2763,6 +2830,8 @@ def main() -> None:
     keybinds_textbox = widgets.get("keybinds_textbox")
     macros_textbox   = widgets.get("macros_textbox")
     save_button = widgets.get("save_button")
+    revert_button = widgets.get("revert_button")
+    _ui_refresh_fn = widgets.get("refresh_all_widgets")
     notice_frame = widgets.get("notice_frame")
     notice_label = widgets.get("notice_label")
     notice_action_button = widgets.get("notice_action_button")
@@ -2878,8 +2947,7 @@ def main() -> None:
         mode,
         language,
         seconds,
-        hotkey,
-        holdkey,
+        ptt_key,
         search_engine,
         ptt_beep_volume,
         tts_output_device,
@@ -2918,54 +2986,138 @@ def main() -> None:
             except Exception:
                 pass
 
+        def _auto_sync_steam():
+            try:
+                found = find_steam_apps()
+            except Exception:
+                return
+            steam_ids = {str(a.get("appid", "")) for a in found}
+            found_by_id = {str(a["appid"]): a for a in found if a.get("appid")}
+
+            changed = False
+            # Remove entries for uninstalled Steam games
+            before = len(apps)
+            apps[:] = [
+                a for a in apps
+                if not str(a.get("command", "")).startswith("start steam://run/")
+                or str(a.get("command", "")).split("/")[-1] in steam_ids
+            ]
+            changed = changed or len(apps) != before
+
+            # Add newly installed Steam games
+            existing_names = {a.get("name") for a in apps}
+            for app in found:
+                name = app.get("name", "").strip().lower()
+                appid = app.get("appid")
+                if name and appid and name not in existing_names:
+                    apps.append({"name": name, "command": f"start steam://run/{appid}"})
+                    existing_names.add(name)
+                    changed = True
+
+            if changed:
+                _bridge.post(lambda: (_refresh_apps(), save_config(_build_config())))
+
+        def _steam_game_watcher():
+            import winreg
+            _auto_enabled = {"value": False}
+            _prev_appid = {"value": 0}
+
+            def _running_appid() -> int:
+                try:
+                    apps_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam\Apps")
+                    i = 0
+                    while True:
+                        try:
+                            sub_name = winreg.EnumKey(apps_key, i)
+                            sub = winreg.OpenKey(apps_key, sub_name)
+                            try:
+                                val, _ = winreg.QueryValueEx(sub, "Running")
+                                if val:
+                                    winreg.CloseKey(sub)
+                                    winreg.CloseKey(apps_key)
+                                    return int(sub_name)
+                            except OSError:
+                                pass
+                            winreg.CloseKey(sub)
+                            i += 1
+                        except OSError:
+                            break
+                    winreg.CloseKey(apps_key)
+                except Exception:
+                    pass
+                return 0
+
+            while True:
+                appid = _running_appid()
+
+                from skills import _gaming_mode, _release_kokoro
+                from app import release_whisper_model
+
+                if appid != 0 and _prev_appid["value"] == 0:
+                    if not _gaming_mode["value"]:
+                        _gaming_mode["value"] = True
+                        _auto_enabled["value"] = True
+                        _fn = _gaming_mode.get("status_fn")
+                        if _fn:
+                            _bridge.post(lambda f=_fn: f(True))
+                        try:
+                            release_whisper_model()
+                            _release_kokoro()
+                        except Exception:
+                            pass
+                elif appid == 0 and _prev_appid["value"] != 0:
+                    if _auto_enabled["value"] and _gaming_mode["value"]:
+                        _gaming_mode["value"] = False
+                        _auto_enabled["value"] = False
+                        _fn = _gaming_mode.get("status_fn")
+                        if _fn:
+                            _bridge.post(lambda f=_fn: f(False))
+
+                _prev_appid["value"] = appid
+                time.sleep(5)
+
         def _after_reveal():
             root.raise_()
             root.activateWindow()
             threading.Thread(target=_startup_update_check, daemon=True).start()
+            threading.Thread(target=_auto_sync_steam, daemon=True).start()
+            threading.Thread(target=_steam_game_watcher, daemon=True).start()
             if _test_update_alert:
                 QTimer.singleShot(500, lambda: _show_update_notice("TEST", test=True))
-            if not cfg.get("wizard_done"):
-                _run_wizard()
-            else:
-                _start_background()
-                if not cfg.get("onboarding_shown"):
-                    def _show_onboarding():
-                        def _dismiss_onboarding():
-                            _hide_inline_notice()
-                            c = load_config()
-                            c["onboarding_shown"] = True
-                            save_config(c)
-                        _show_inline_notice(
-                            'Try saying "show help" or "what can I say" to see everything VERA can do.',
-                            tone="info",
-                            duration_ms=0,
-                            action_text="Got it",
-                            action_callback=_dismiss_onboarding,
-                        )
-                    QTimer.singleShot(1500, _show_onboarding)
-                if _is_premium() and not cfg.get("premium_onboarding_shown"):
-                    def _show_premium_onboarding():
-                        def _dismiss_premium_onboarding():
-                            _hide_inline_notice()
-                            c = load_config()
-                            c["premium_onboarding_shown"] = True
-                            save_config(c)
-                        _show_inline_notice(
-                            'Welcome to VERA+. Themes and wake phrases are in Settings → Personality. Macros are in Integrations. Say "show help" to see everything you can do.',
-                            tone="info",
-                            duration_ms=0,
-                            action_text="Got it",
-                            action_callback=_dismiss_premium_onboarding,
-                        )
-                    QTimer.singleShot(2500, _show_premium_onboarding)
-                if idle_chatter.get():
-                    def _do_startup_greeting():
-                        import time as _t
-                        _t.sleep(2.0)
-                        from skills import _tts_speak
-                        from personality import get_startup_greeting
-                        _tts_speak(get_startup_greeting())
-                    threading.Thread(target=_do_startup_greeting, daemon=True).start()
+            _start_background()
+            if not cfg.get("onboarding_shown"):
+                def _on_tour_complete():
+                    c = load_config()
+                    c["onboarding_shown"] = True
+                    save_config(c)
+                QTimer.singleShot(600, lambda: tour.run_tour(
+                    root, widgets,
+                    nav_select=widgets.get("nav_select"),
+                    on_complete=_on_tour_complete,
+                ))
+            if _is_premium() and not cfg.get("premium_onboarding_shown"):
+                def _show_premium_onboarding():
+                    def _dismiss_premium_onboarding():
+                        _hide_inline_notice()
+                        c = load_config()
+                        c["premium_onboarding_shown"] = True
+                        save_config(c)
+                    _show_inline_notice(
+                        'Welcome to VERA+. Themes and wake phrases are in Settings → Personality. Macros are in Integrations. Say "show help" to see everything you can do.',
+                        tone="info",
+                        duration_ms=0,
+                        action_text="Got it",
+                        action_callback=_dismiss_premium_onboarding,
+                    )
+                QTimer.singleShot(2500, _show_premium_onboarding)
+            if idle_chatter.get():
+                def _do_startup_greeting():
+                    import time as _t
+                    _t.sleep(2.0)
+                    from skills import _tts_speak
+                    from personality import get_startup_greeting
+                    _tts_speak(get_startup_greeting())
+                threading.Thread(target=_do_startup_greeting, daemon=True).start()
 
         _animate_launch_reveal(_after_reveal)
 
@@ -3061,6 +3213,52 @@ def main() -> None:
         _start_power_watcher._refs = (_power_callback, params, registration)
 
     _start_power_watcher()
+
+    # Freeze watchdog — detects when the Qt main thread stops responding.
+    # A QTimer updates _heartbeat every second; a background thread restarts
+    # VERA if the heartbeat goes stale for more than 10 seconds.
+    _heartbeat = [time.monotonic()]
+
+    _hb_timer = QTimer()
+    _hb_timer.setInterval(1000)
+    _hb_timer.timeout.connect(lambda: _heartbeat.__setitem__(0, time.monotonic()))
+    _hb_timer.start()
+
+    def _freeze_watcher():
+        import psutil
+        log_dir = os.path.join(os.path.dirname(__file__), "data", "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, "freeze_watchdog.log")
+        proc = psutil.Process()
+        while True:
+            time.sleep(5)
+            stale = time.monotonic() - _heartbeat[0]
+            if stale > 10:
+                try:
+                    mb = proc.memory_info().rss / 1024 / 1024
+                    threads = proc.num_threads()
+                except Exception:
+                    mb, threads = -1, -1
+                try:
+                    import threading as _th
+                    py_threads = _th.enumerate()
+                    py_names = [t.name for t in py_threads]
+                    with open(log_path, "a", encoding="utf-8") as f:
+                        f.write(
+                            f"\n--- FREEZE DETECTED {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n"
+                            f"  Heartbeat stale: {stale:.1f}s\n"
+                            f"  RSS: {mb:.1f} MB\n"
+                            f"  OS threads: {threads}  Python threads: {len(py_threads)}\n"
+                            f"  Python thread names:\n"
+                        )
+                        for name in py_names:
+                            f.write(f"    {name}\n")
+                except Exception:
+                    pass
+                _bridge.post(lambda: QTimer.singleShot(0, _do_restart))
+                time.sleep(30)  # back off — restart is already queued
+
+    threading.Thread(target=_freeze_watcher, daemon=True).start()
 
     root.show()
     _start_tray()

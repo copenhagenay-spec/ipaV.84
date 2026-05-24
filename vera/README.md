@@ -5,13 +5,11 @@ Voice-controlled personal assistant for Windows.
 ## Quick Start
 
 1. Download the latest `VERA_Setup_x.x.x.exe` from the [releases page](https://github.com/copenhagenay-spec/Vera-beta/releases)
-2. Run the installer — it handles Python packages, espeak-ng, and voice model files automatically
-3. The setup wizard opens on first launch:
-   - Choose your **listening mode** (Wake Word, Hold-to-talk, or Push to Toggle)
-   - Optionally import your Steam library and create a desktop shortcut
-   - Click **Finish**
+2. Run the installer — it handles Python packages and voice model files automatically
+3. On first launch a short spotlight tour walks you through setting your PTT key and listening mode
+4. VERA starts listening in the background — look for the icon in your system tray
 
-VERA starts listening in the background after the wizard completes.
+Say **"what can I say"** to see everything VERA can do.
 
 ## Troubleshooting
 
@@ -55,9 +53,10 @@ Run the uninstaller from Add/Remove Programs, or double-click `uninstall.cmd` in
 - **Type/send:** `type <text>`, `send message <text>`
 - **TTS:** `read out <text>`
 - **Mute VERA:** `mute` / `be quiet` / `unmute`
-- **Gaming mode:** `start gaming mode` — strips responses to ultra-short, silences idle chatter
+- **Gaming mode:** `start gaming mode` — strips responses to ultra-short, silences idle chatter; activates automatically when a Steam game is launched
+- **Steam auto-sync:** Steam library is synced on every launch — new installs added, uninstalled games removed automatically
 - **Game overlay:** transparent always-on-top bar showing last 3 voice exchanges
-- **AI query:** `ask <question>` — spoken answer via Groq, Claude, or OpenAI (see AI Setup)
+- **AI query:** `ask <question>` — spoken answer via Groq, Claude, or OpenAI; remembers conversation context within the session (see AI Setup)
 - **Discord:** send messages, read channels, delete/purge via webhook
 - **Personalities:** Default, Professional, Jarvis (free); Offensive (Premium)
 - **Idle chatter:** VERA speaks unprompted after inactivity (toggle in Settings)

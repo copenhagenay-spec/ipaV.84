@@ -14,6 +14,24 @@ import urllib.error
 _GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 _MODEL = "llama-3.1-8b-instant"  # fast, low latency, good for short replies
 
+_MAX_HISTORY = 10  # 5 exchanges
+_conv_history: list[dict] = []
+
+
+def _get_history() -> list[dict]:
+    return _conv_history
+
+
+def append_exchange(user_text: str, assistant_text: str) -> None:
+    _conv_history.append({"role": "user", "content": user_text})
+    _conv_history.append({"role": "assistant", "content": assistant_text})
+    if len(_conv_history) > _MAX_HISTORY:
+        del _conv_history[:len(_conv_history) - _MAX_HISTORY]
+
+
+def clear_history() -> None:
+    _conv_history.clear()
+
 _SYSTEM_DEFAULT = (
     "You are VERA, a casual and helpful voice assistant. "
     "You're warm, a little witty, and occasionally sarcastic but always friendly. "
@@ -93,12 +111,14 @@ def vera_chat(transcript: str, mode: str = "default", context: dict | None = Non
 
     model = _MODEL
     max_tokens = 75
+    messages = [
+        {"role": "system", "content": system},
+        *_get_history(),
+        {"role": "user", "content": transcript},
+    ]
     payload = json.dumps({
         "model": model,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": transcript},
-        ],
+        "messages": messages,
         "max_tokens": max_tokens,
         "temperature": 0.95,
     }).encode("utf-8")
@@ -122,6 +142,8 @@ def vera_chat(transcript: str, mode: str = "default", context: dict | None = Non
             .get("content", "")
             .strip()
         )
+        if text:
+            append_exchange(transcript, text)
         return text if text else None
     except Exception:
         return None

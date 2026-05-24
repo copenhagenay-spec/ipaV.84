@@ -473,10 +473,8 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     # -- Unpack state --
     mode            = state["mode"]
     language        = state["language"]
-    hotkey          = state["hotkey"]
-    holdkey         = state["holdkey"]
-    hotkey_display  = state["hotkey_display"]
-    holdkey_display = state["holdkey_display"]
+    ptt_key         = state["ptt_key"]
+    ptt_key_display = state["ptt_key_display"]
     search_engine   = state["search_engine"]
     confirm_actions = state["confirm_actions"]
     idle_chatter    = state["idle_chatter"]
@@ -537,7 +535,6 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     _add_app             = callbacks["add_app"]
     _remove_app          = callbacks["remove_app"]
     _test_app            = callbacks["test_app"]
-    _import_steam        = callbacks["import_steam"]
     _add_alias           = callbacks["add_alias"]
     _remove_alias        = callbacks["remove_alias"]
     _add_action          = callbacks["add_action"]
@@ -613,6 +610,11 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     _bg_frame_ref  = [None]  # current QPixmap painted by home_inner.paintEvent
     _bg_player_ref = [None]  # QMediaPlayer for MP4 backgrounds
     _bg_sink_ref   = [None]  # QVideoSink for MP4 frame capture
+
+    _vc = state.get("video_ctrl")
+    if _vc is not None:
+        _vc["pause"]  = lambda: _bg_player_ref[0].pause() if _bg_player_ref[0] else None
+        _vc["resume"] = lambda: _bg_player_ref[0].play()  if _bg_player_ref[0] else None
     _knob_btn_ref  = [None]  # mutable ref so theme switcher can update knob image
     _nav_btns      = []      # populated later; empty list guards early _apply_home_theme calls
     _COLOR_ACTIVE  = [_PREM_ACCENT if is_premium() else _ACCENT]  # mutable so theme can update it
@@ -1060,41 +1062,23 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     lang_combo.currentTextChanged.connect(language.set)
     rec_vl.addWidget(_hrow(lang_lbl, lang_combo))
 
-    # Hotkey row
-    hk_lbl = QLabel("Toggle key")
-    hk_lbl.setFixedWidth(120)
-    hk_lbl.setStyleSheet(f"color: {_TEXT};")
-    hk_edit = _make_entry(160)
-    hk_edit.setText(hotkey_display.get())
+    # PTT Key row (unified — used for both hold and toggle modes)
+    ptt_lbl = QLabel("PTT Key")
+    ptt_lbl.setFixedWidth(120)
+    ptt_lbl.setStyleSheet(f"color: {_TEXT};")
+    ptt_edit = _make_entry(160)
+    ptt_edit.setText(ptt_key_display.get())
 
-    def _on_hk_text_changed(text):
-        hotkey_display.set(text)
+    def _on_ptt_text_changed(text):
+        ptt_key_display.set(text)
 
-    hk_edit.textChanged.connect(_on_hk_text_changed)
+    ptt_edit.textChanged.connect(_on_ptt_text_changed)
 
-    def _hk_record():
-        _record_hotkey(hotkey, on_done=lambda: hk_edit.setText(hotkey_display.get()))
+    def _ptt_record():
+        _record_hold_key(ptt_key, on_done=lambda: ptt_edit.setText(ptt_key_display.get()))
 
-    hk_rec_btn = _secondary_btn("Record", _hk_record)
-    rec_vl.addWidget(_hrow(hk_lbl, hk_edit, hk_rec_btn))
-
-    # Hold key row
-    hold_lbl = QLabel("Hold key")
-    hold_lbl.setFixedWidth(120)
-    hold_lbl.setStyleSheet(f"color: {_TEXT};")
-    hold_edit = _make_entry(160)
-    hold_edit.setText(holdkey_display.get())
-
-    def _on_hold_text_changed(text):
-        holdkey_display.set(text)
-
-    hold_edit.textChanged.connect(_on_hold_text_changed)
-
-    def _hold_record():
-        _record_hold_key(holdkey, on_done=lambda: hold_edit.setText(holdkey_display.get()))
-
-    hold_rec_btn = _secondary_btn("Record", _hold_record)
-    rec_vl.addWidget(_hrow(hold_lbl, hold_edit, hold_rec_btn))
+    ptt_rec_btn = _secondary_btn("Record", _ptt_record)
+    rec_vl.addWidget(_hrow(ptt_lbl, ptt_edit, ptt_rec_btn))
 
     # Secondary PTT row
     _record_secondary_ptt_fn = callbacks.get("record_secondary_ptt")
@@ -1502,8 +1486,7 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     apps_vl.addWidget(_hrow(
         _primary_btn("Add App", _add_app),
         _secondary_btn("Test App", _test_app),
-        _secondary_btn("Import Steam", _import_steam),
-        _danger_btn("Remove Selected", _remove_app),
+_danger_btn("Remove Selected", _remove_app),
     ))
 
     _aa_spacer = QWidget(); _aa_spacer.setFixedHeight(6)
@@ -2045,7 +2028,22 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     status_layout.addWidget(transcript_entry)
     status_layout.addStretch()
 
-    # Save button (hidden until dirty)
+    # Save / Revert buttons (hidden until dirty)
+    revert_button = QPushButton("Revert")
+    revert_button.setStyleSheet("""
+        QPushButton {
+            background-color: #374151; color: #9ca3af;
+            border-radius: 999px; padding: 5px 16px;
+            font-size: 11px; font-weight: bold;
+        }
+        QPushButton:hover { background-color: #4b5563; color: white; }
+    """)
+    _revert_fn = callbacks.get("revert")
+    if callable(_revert_fn):
+        revert_button.clicked.connect(_revert_fn)
+    revert_button.setVisible(False)
+    status_layout.addWidget(revert_button)
+
     save_button = QPushButton("Unsaved changes")
     save_button.setStyleSheet("""
         QPushButton {
@@ -2243,6 +2241,31 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
     record_backdrop.resizeEvent = lambda e: _position_record_overlay()
 
     # =====================================================================
+    # WIDGET REFRESH (called by revert to re-sync all controls from vars)
+    # =====================================================================
+    def _refresh_all_widgets():
+        lang_combo.setCurrentText(language.get())
+        ptt_edit.setText(ptt_key_display.get())
+        se_edit.setText(search_engine.get())
+        bv_slider.setValue(int(ptt_beep_volume.get()))
+        vo_combo.setCurrentText(tts_output_device.get() or "Default")
+        voice_combo.setCurrentText(tts_voice.get())
+        confirm_chk.setChecked(bool(confirm_actions.get()))
+        pers_combo.setCurrentText(personality_mode.get())
+        chatter_chk.setChecked(bool(idle_chatter.get()))
+        spot_media_chk.setChecked(bool(spotify_media.get()))
+        spot_req_chk.setChecked(bool(spotify_requires.get()))
+        spot_kw_edit.setText(spotify_keywords.get())
+        ovl_pos_combo.setCurrentText(overlay_position.get())
+        news_combo.setCurrentText(news_source.get())
+        bday_month_combo.setCurrentText(str(birthday_month.get()))
+        bday_day_combo.setCurrentText(str(birthday_day.get()))
+        ai_edit.setText(gemini_api_key_var.get())
+        token_edit.setText(discord_bot_token_var.get())
+        srv_id_edit.setText(discord_server_id_var.get())
+        _sync_mode_radios()
+
+    # =====================================================================
     # RETURN DICT
     # =====================================================================
     return {
@@ -2257,6 +2280,7 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
         "macro_pending_textbox": macro_pending_textbox,
         "tabview": stack,
         "save_button": save_button,
+        "revert_button": revert_button,
         "notice_frame": notice_frame,
         "notice_label": notice_label,
         "notice_action_button": notice_action_button,
@@ -2274,6 +2298,10 @@ def build_ui(window, state: dict, callbacks: dict, constants: dict):
         "record_status_label": record_status_label,
         "status_label": status_label,
         "transcript_entry": transcript_entry,
+        "refresh_all_widgets": _refresh_all_widgets,
+        "ptt_edit": ptt_edit,
+        "seg_container": seg_container,
+        "nav_select": _nav_select,
     }
 
 

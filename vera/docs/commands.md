@@ -190,6 +190,8 @@ A full list of everything you can say to VERA. Say **"what can I say"** at any t
 | `stop gaming mode` | Returns VERA to normal behavior |
 
 > **"Gaming Mode"** appears in the status bar while active.
+>
+> **Steam users:** Gaming mode activates and deactivates automatically when a Steam game is launched or closed. Manual commands still work as normal.
 
 ---
 
@@ -228,6 +230,8 @@ A full list of everything you can say to VERA. Say **"what can I say"** at any t
 > Requires an API key in the Integrations tab. See the [AI Setup Guide](ai-setup.md) for details.
 >
 > **Example:** "ask what is the capital of France"
+>
+> **Conversational memory:** VERA remembers the last 5 exchanges within a session, so follow-up questions work naturally. Context clears on restart.
 
 ---
 

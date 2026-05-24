@@ -47,7 +47,7 @@ Common issues and how to fix them. If your problem isn't listed here, submit a b
 
 **"Open \<app\> doesn't work"**
 - The app may not be in VERA's list — check the **Apps** tab in the UI
-- If it's a Steam game, run **Import Steam** in the Apps tab
+- If it's a Steam game, VERA syncs your Steam library automatically on every launch — restart VERA and try again
 - If it's not on Steam, add it manually — see [Adding Apps](adding-apps.md)
 - Spotify and Discord are not auto-discovered and must be added manually
 
@@ -73,7 +73,7 @@ Common issues and how to fix them. If your problem isn't listed here, submit a b
 
 **"VERA's voice sounds wrong or robotic"**
 - Try a different voice in **Settings → Voice** — there are 11 Kokoro voices available
-- Make sure espeak-ng was installed correctly — run `setup_installer.cmd` if unsure
+- Run `setup_installer.cmd` to reinstall dependencies
 
 ---
 

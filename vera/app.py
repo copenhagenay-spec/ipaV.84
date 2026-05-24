@@ -37,6 +37,13 @@ def _whisper_model_cached() -> bool:
     return os.path.isdir(os.path.join(cache_dir, model_slug))
 
 
+def release_whisper_model() -> None:
+    """Unload the Whisper model from memory. Frees ~350MB. Reloads on next use."""
+    import gc
+    _model_cache.pop(_WHISPER_MODEL_SIZE, None)
+    gc.collect()
+
+
 def _get_whisper_model():
     """Lazy-load and cache the faster-whisper model."""
     if _WHISPER_MODEL_SIZE not in _model_cache:

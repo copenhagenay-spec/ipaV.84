@@ -16,7 +16,6 @@ This guide walks you through getting VERA up and running from scratch.
 Double-click the installer and follow the prompts. The installer handles everything automatically:
 
 - Python package dependencies
-- espeak-ng voice engine
 - Kokoro TTS model files (~310MB, downloaded once)
 
 A progress screen shows each step. This takes a minute or two depending on your connection.
@@ -25,37 +24,23 @@ A progress screen shows each step. This takes a minute or two depending on your 
 
 ---
 
-## Step 3 — Setup Wizard
+## Step 3 — Guided Tour
 
-VERA opens the setup wizard automatically on first launch. Work through each section and click **Finish** when done.
+On first launch VERA walks you through the basics with a short spotlight tour:
 
-### Listening Mode
+1. **PTT Key** — click Record and press any key, mouse button, or controller button
+2. **Listening Mode** — choose Hold-to-talk, Toggle, or Wake Word
+3. You're done — say **"what can I say"** to see everything VERA can do
 
-Choose how VERA listens for your commands:
-
-| Mode | How it works |
-|---|---|
-| **Wake Word** | Say "vera" to activate, then speak your command |
-| **Hold-to-talk** | Hold a key or button while speaking, release when done |
-| **Push to Toggle** | Press once to start listening, press again to stop |
-
-Click **Record** to assign your key or button for Hold-to-talk or Push to Toggle.
-
-### Steam Import (optional)
-
-Click **Import Steam Apps** to add your entire Steam library so you can open games by voice.
-
-### Desktop Shortcut (optional)
-
-Check **Create desktop shortcut** to put VERA on your desktop.
+You can skip the tour and configure everything later in **Settings**.
 
 ---
 
-## Step 4 — Finish
+## Step 4 — Start Using VERA
 
-Click **Finish**. VERA launches and starts listening in the background — look for the icon in your system tray.
+VERA starts listening in the background automatically — look for the icon in your system tray.
 
-Say **"what can I say"** to see a full list of available commands.
+> **Steam users:** Your Steam library is imported automatically on every launch. Games you install or uninstall are kept in sync with no manual action needed. Gaming mode also activates automatically when a Steam game is running.
 
 ---
 
