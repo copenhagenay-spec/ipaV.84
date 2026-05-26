@@ -2646,7 +2646,7 @@ def _ih_custom_actions(m, t, allow_prompt, confirm_fn, restart_fn):
 @_intent(400, r"^.+$")
 def _ih_spotify(m, t, allow_prompt, confirm_fn, restart_fn):
     cfg = load_config()
-    spotify_enabled = cfg.get("spotify_media", False)
+    spotify_enabled = cfg.get("spotify_media", True)
     require_spotify = cfg.get("spotify_requires_keyword", True)
     keywords = _get_spotify_keywords(cfg)
     has_spotify = _has_keyword(t, keywords)

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.99.8.5 — Hotfix
+- Fixed: SH|RA not launching on machines without a system Python install — launcher now correctly uses the bundled embedded Python.
+- Changed: Spotify / media controls now enabled by default on fresh installs.
+- Improved: Updates no longer re-download voice models if they are already present (~310 MB saved per update).
+
+## 0.99.8
+- Added: Start Menu auto-discovery — SH|RA now scans the Windows Start Menu on startup and adds installed apps automatically. Spotify, Discord, and other store apps are found this way.
+- Added: Weather and news commands — "what's the weather in [city]" and "give me the news".
+- Added: Per-app volume control — "set [app] volume [0-100]".
+- Fixed: Administrative Tools shortcuts (Event Viewer, Registry Editor, Task Scheduler, etc.) no longer appear in the app list.
+- Changed: Python is no longer required as a separate install — it is now bundled with the installer.
+- Changed: Save and Revert buttons use rounded corners consistent with the rest of the UI.
+
 ## 0.99.7.2 — Hotfix
 - Fixed: SH|RA would not launch after a fresh install — tour.py was missing from the installer package.
 

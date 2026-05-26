@@ -9,16 +9,20 @@ if getattr(sys, 'frozen', False):
     # SHRA.exe lives in launcher_out\ — assistant.py is one level up
     if os.path.exists(os.path.join(exe_dir, 'assistant.py')):
         base = exe_dir
+        _dev_mode = False
     else:
         base = os.path.dirname(exe_dir)
+        _dev_mode = True  # running from launcher_out, packages are in system Python
 else:
     base = os.path.dirname(os.path.abspath(__file__))
+    _dev_mode = False
 
 def _find_pythonw():
-    # Prefer bundled embedded Python
-    embedded = os.path.join(base, "python", "pythonw.exe")
-    if os.path.exists(embedded):
-        return embedded
+    # Prefer bundled embedded Python — skip in dev mode (python\ has no packages)
+    if not _dev_mode:
+        embedded = os.path.join(base, "python", "pythonw.exe")
+        if os.path.exists(embedded):
+            return embedded
 
     local = os.environ.get("LOCALAPPDATA", "")
     pf    = os.environ.get("ProgramFiles", "")
