@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.99.9 — Hotfix
+- Fixed: Listener failing to start — input_wrapper.py and tray_wrapper.py incorrectly removed from installer package in 0.99.8.9.
+
 ## 0.99.8.9 — Hotfix
 - Fixed: SH|RA crashing on launch after 0.99.8.8 update — license.py was incorrectly removed from the installer package.
 
