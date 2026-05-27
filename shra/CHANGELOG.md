@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.99.8.6 — Hotfix
+## 0.99.8.8 — Hotfix
 - Fixed: SH|RA not launching on machines without a system Python install — launcher now correctly uses the bundled embedded Python.
 - Changed: Spotify / media controls now enabled by default on fresh installs.
 - Improved: Updates no longer re-download voice models if they are already present (~310 MB saved per update).
