@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.99.8.9 — Hotfix
+- Fixed: SH|RA crashing on launch after 0.99.8.8 update — license.py was incorrectly removed from the installer package.
+
 ## 0.99.8.8 — Hotfix
 - Fixed: SH|RA not launching on machines without a system Python install — launcher now correctly uses the bundled embedded Python.
 - Changed: Spotify / media controls now enabled by default on fresh installs.
