@@ -1517,7 +1517,7 @@ _danger_btn("Remove Selected", _remove_app),
     ai_cvl.setContentsMargins(12, 8, 12, 8)
     ai_lbl = QLabel("API Key")
     ai_lbl.setStyleSheet(f"color: {_TEXT}; min-width: 120px;")
-    ai_edit = _make_entry(320, "Groq API key", password=True)
+    ai_edit = _make_entry(320, "Groq / OpenAI / Anthropic key", password=True)
     ai_edit.setText(gemini_api_key_var.get())
     ai_edit.textChanged.connect(gemini_api_key_var.set)
     ai_cvl.addWidget(_hrow(ai_lbl, ai_edit))

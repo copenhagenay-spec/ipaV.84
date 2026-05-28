@@ -12,7 +12,11 @@ import urllib.request
 import urllib.error
 
 _GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-_MODEL = "llama-3.1-8b-instant"  # fast, low latency, good for short replies
+_ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+_OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+_MODEL_GROQ = "llama-3.1-8b-instant"
+_MODEL_ANTHROPIC = "claude-haiku-4-5-20251001"
+_MODEL_OPENAI = "gpt-4o-mini"
 
 _MAX_HISTORY = 10  # 5 exchanges
 _conv_history: list[dict] = []
@@ -109,39 +113,86 @@ def shra_chat(transcript: str, mode: str = "default", context: dict | None = Non
         if parts:
             system += "\n\nSession context: " + " ".join(parts)
 
-    model = _MODEL
-    max_tokens = 75
-    messages = [
-        {"role": "system", "content": system},
-        *_get_history(),
-        {"role": "user", "content": transcript},
-    ]
-    payload = json.dumps({
-        "model": model,
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": 0.95,
-    }).encode("utf-8")
-
     try:
-        req = urllib.request.Request(
-            _GROQ_URL,
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {key}",
-                "User-Agent": "SHRA/1.0",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        text = (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
-        )
+        if key.startswith("sk-ant-"):
+            payload = json.dumps({
+                "model": _MODEL_ANTHROPIC,
+                "max_tokens": 75,
+                "system": system,
+                "messages": [*_get_history(), {"role": "user", "content": transcript}],
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                _ANTHROPIC_URL,
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "x-api-key": key,
+                    "anthropic-version": "2023-06-01",
+                    "User-Agent": "SHRA/1.0",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            text = data.get("content", [{}])[0].get("text", "").strip()
+        elif key.startswith("sk-"):
+            payload = json.dumps({
+                "model": _MODEL_OPENAI,
+                "messages": [
+                    {"role": "system", "content": system},
+                    *_get_history(),
+                    {"role": "user", "content": transcript},
+                ],
+                "max_tokens": 75,
+                "temperature": 0.95,
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                _OPENAI_URL,
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {key}",
+                    "User-Agent": "SHRA/1.0",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            text = (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
+        else:
+            payload = json.dumps({
+                "model": _MODEL_GROQ,
+                "messages": [
+                    {"role": "system", "content": system},
+                    *_get_history(),
+                    {"role": "user", "content": transcript},
+                ],
+                "max_tokens": 75,
+                "temperature": 0.95,
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                _GROQ_URL,
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {key}",
+                    "User-Agent": "SHRA/1.0",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            text = (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
         if text:
             append_exchange(transcript, text)
         return text if text else None

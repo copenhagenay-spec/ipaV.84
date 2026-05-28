@@ -264,13 +264,22 @@ class BackgroundListener:
 
         else:
             from pynput import keyboard  # type: ignore
-            key_obj = _resolve_hold_key(toggle_key, keyboard)
-            if not key_obj:
-                raise ValueError("Invalid toggle key")
-
-            def _on_press(key):
-                if key == key_obj:
-                    _toggle()
+            _raw_tk = toggle_key.strip().lower().strip('<>')
+            _numpad_set = {"num0","num1","num2","num3","num4","num5","num6","num7",
+                           "num8","num9","numdecimal","nummultiply","numadd","numsubtract",
+                           "numdivide","numenter"}
+            if _raw_tk in _numpad_set:
+                _toggle_vk = _key_name_to_vk(_raw_tk)
+                def _on_press(key):
+                    if hasattr(key, 'vk') and key.vk == _toggle_vk:
+                        _toggle()
+            else:
+                key_obj = _resolve_hold_key(toggle_key, keyboard)
+                if not key_obj:
+                    raise ValueError("Invalid toggle key")
+                def _on_press(key):
+                    if key == key_obj:
+                        _toggle()
 
             self.listener = keyboard.Listener(on_press=_on_press)
             self.listener.start()

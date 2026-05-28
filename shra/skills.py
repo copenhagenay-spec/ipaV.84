@@ -1559,6 +1559,7 @@ def _ask_ai(question: str) -> bool:
                 return
             _log_event(f"ASK_AI: {question} -> {answer}")
             append_exchange(question.strip(), answer)
+            trigger_groq_flash()
             _tts_speak(answer)
         except urllib.error.HTTPError as exc:
             try:
