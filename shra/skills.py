@@ -1034,6 +1034,7 @@ def _show_help() -> None:
         "",
         "Clipboard:",
         "  read clipboard",
+        "  copy that / copy selection",
         "  copy <text>",
         "  paste that / paste clipboard",
         "  clear clipboard",
@@ -1147,6 +1148,7 @@ def _show_help() -> None:
         ]),
         ("Clipboard", [
             "read clipboard",
+            "copy that  /  copy selection",
             "copy <text>",
             "paste that  /  paste clipboard",
             "clear clipboard",
@@ -2830,7 +2832,25 @@ def _ih_clipboard_paste(m, t, allow_prompt, confirm_fn, restart_fn):
     return True
 
 
-# --- Clipboard: copy ---
+# --- Clipboard: copy selection (Ctrl+C whatever is highlighted) ---
+@_intent(248, r"\bcopy\s+(that|this|selection|selected|it|highlighted|the\s+selection)\b")
+def _ih_clipboard_copy_selection(m, t, allow_prompt, confirm_fn, restart_fn):
+    try:
+        import time as _time
+        from pynput.keyboard import Controller as _KbCtrl, Key as _Key
+        _kb = _KbCtrl()
+        _kb.press(_Key.ctrl)
+        _kb.press('c')
+        _kb.release('c')
+        _kb.release(_Key.ctrl)
+        _time.sleep(0.2)
+        _shra_confirm("default")
+    except Exception:
+        _tts_speak("Couldn't copy that")
+    return True
+
+
+# --- Clipboard: copy dictated text ---
 @_intent(245, r"\bcopy\s+(.+)$")
 def _ih_clipboard_copy(m, t, allow_prompt, confirm_fn, restart_fn):
     text_to_copy = m.group(1).strip()

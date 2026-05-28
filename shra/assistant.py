@@ -177,7 +177,6 @@ class BackgroundListener:
         ).start()
 
     def start_toggle(self, toggle_key: str, model_path: str, confirm_fn, on_text=None, restart_fn=None, on_record_start=None, on_record_end=None):
-        from pynput import keyboard  # type: ignore
 
         def _record():
             try:
@@ -194,28 +193,88 @@ class BackgroundListener:
                 self.recording_flag.clear()
                 self.stop_event.clear()
 
-        key_obj = _resolve_hold_key(toggle_key, keyboard)
-        if not key_obj:
-            raise ValueError("Invalid toggle key")
-
-        def _on_press(key):
-            if key == key_obj:
-                if not self.recording_flag.is_set():
-                    # First press — start recording
-                    self.recording_flag.set()
-                    self.stop_event.clear()
-                    threading.Thread(target=_record, daemon=True).start()
-                    self._play_ptt_beep(660)
-                else:
-                    # Second press — stop recording
-                    self._play_ptt_beep(440)
-                    self.stop_event.set()
+        def _toggle():
+            if not self.recording_flag.is_set():
+                self.recording_flag.set()
+                self.stop_event.clear()
+                threading.Thread(target=_record, daemon=True).start()
+                self._play_ptt_beep(660)
+            else:
+                self._play_ptt_beep(440)
+                self.stop_event.set()
 
         self.stop()
         self.mode = "toggle"
-        self.listener = keyboard.Listener(on_press=_on_press)
-        self.listener.start()
-        self._elevate_listener_priority()
+
+        if _is_mouse_button(toggle_key):
+            from pynput import mouse  # type: ignore
+            button_obj = _resolve_mouse_button(toggle_key, mouse)
+            if not button_obj:
+                raise ValueError("Invalid mouse button")
+
+            def _on_click(x, y, button, pressed):
+                if button == button_obj and pressed:
+                    _toggle()
+
+            self.listener = mouse.Listener(on_click=_on_click)
+            self.listener.start()
+
+        elif _is_joy_button(toggle_key):
+            parsed = _parse_joy_button(toggle_key)
+            if not parsed:
+                raise ValueError("Invalid joystick button spec")
+            joy_id, btn_idx = parsed
+
+            import ctypes as _ctypes
+
+            class _JOYINFOEX(_ctypes.Structure):
+                _fields_ = [
+                    ("dwSize", _ctypes.c_uint32), ("dwFlags", _ctypes.c_uint32),
+                    ("dwXpos", _ctypes.c_uint32), ("dwYpos", _ctypes.c_uint32),
+                    ("dwZpos", _ctypes.c_uint32), ("dwRpos", _ctypes.c_uint32),
+                    ("dwUpos", _ctypes.c_uint32), ("dwVpos", _ctypes.c_uint32),
+                    ("dwButtons", _ctypes.c_uint32), ("dwButtonNumber", _ctypes.c_uint32),
+                    ("dwPOV", _ctypes.c_uint32), ("dwReserved1", _ctypes.c_uint32),
+                    ("dwReserved2", _ctypes.c_uint32),
+                ]
+
+            _winmm = _ctypes.windll.winmm
+            _JOY_RETURNALL = 0x00FF
+            _btn_mask = 1 << btn_idx
+            _poll_stop = threading.Event()
+
+            def _joy_poll():
+                prev_pressed = False
+                import time as _t
+                while not _poll_stop.is_set():
+                    info = _JOYINFOEX()
+                    info.dwSize = _ctypes.sizeof(_JOYINFOEX)
+                    info.dwFlags = _JOY_RETURNALL
+                    if _winmm.joyGetPosEx(joy_id, _ctypes.byref(info)) == 0:
+                        pressed = bool(info.dwButtons & _btn_mask)
+                        if pressed and not prev_pressed:
+                            _toggle()
+                        prev_pressed = pressed
+                    _t.sleep(0.01)
+
+            self._poll_stop = _poll_stop
+            _poll_thread = threading.Thread(target=_joy_poll, daemon=True)
+            _poll_thread.start()
+            self.listener = _poll_thread
+
+        else:
+            from pynput import keyboard  # type: ignore
+            key_obj = _resolve_hold_key(toggle_key, keyboard)
+            if not key_obj:
+                raise ValueError("Invalid toggle key")
+
+            def _on_press(key):
+                if key == key_obj:
+                    _toggle()
+
+            self.listener = keyboard.Listener(on_press=_on_press)
+            self.listener.start()
+            self._elevate_listener_priority()
 
     def start_hold(self, hold_key: str, model_path: str, confirm_fn, on_text=None, restart_fn=None, on_record_start=None, on_record_end=None):
         from pynput import keyboard  # type: ignore
@@ -377,6 +436,13 @@ def _resolve_hold_key(key_name: str, keyboard):
     raw = str(key_name).strip().lower()
     if raw.startswith("<") and raw.endswith(">"):
         raw = raw[1:-1].strip()
+    # Numpad keys — pynput delivers these as KeyCode with a specific VK
+    vk = _key_name_to_vk(raw)
+    _numpad_names = {"num0","num1","num2","num3","num4","num5","num6","num7",
+                     "num8","num9","numdecimal","nummultiply","numadd","numsubtract",
+                     "numdivide","numenter"}
+    if raw in _numpad_names and vk:
+        return keyboard.KeyCode.from_vk(vk)
     if len(raw) == 1:
         return keyboard.KeyCode.from_char(raw)
     try:
@@ -405,6 +471,11 @@ def _key_name_to_vk(key_name: str):
         "left_shift": 0xA0, "right_shift": 0xA1,
         "left_ctrl": 0xA2, "right_ctrl": 0xA3,
         "left_alt": 0xA4, "right_alt": 0xA5,
+        # Numpad
+        "num0": 0x60, "num1": 0x61, "num2": 0x62, "num3": 0x63, "num4": 0x64,
+        "num5": 0x65, "num6": 0x66, "num7": 0x67, "num8": 0x68, "num9": 0x69,
+        "numdecimal": 0x6E, "nummultiply": 0x6A, "numadd": 0x6B,
+        "numsubtract": 0x6D, "numdivide": 0x6F, "numenter": 0x0D,
     }
     if raw in _special:
         return _special[raw]
@@ -413,10 +484,6 @@ def _key_name_to_vk(key_name: str):
         if vk != -1:
             return vk & 0xFF
     return None
-
-
-def _is_mouse_button(key_name: str) -> bool:
-    return _normalize_record_key_name(key_name) in ("x1", "x2")
 
 
 def _is_joy_button(key_name: str) -> bool:
@@ -439,6 +506,8 @@ def _resolve_mouse_button(key_name: str, mouse):
         return mouse.Button.x1
     if raw == "x2":
         return mouse.Button.x2
+    if raw == "middle":
+        return mouse.Button.middle
     return None
 
 
@@ -453,8 +522,15 @@ def _normalize_record_key_name(key_name: str) -> str:
         "mouse fwd (x2)": "x2",
         "mouse forward (x2)": "x2",
         "forward mouse button": "x2",
+        "mouse middle": "middle",
+        "middle mouse": "middle",
+        "middle mouse button": "middle",
     }
     return aliases.get(raw, raw)
+
+
+def _is_mouse_button(key_name: str) -> bool:
+    return _normalize_record_key_name(key_name) in ("x1", "x2", "middle")
 
 
 def _format_record_key_name(key_name: str) -> str:
@@ -463,6 +539,8 @@ def _format_record_key_name(key_name: str) -> str:
         return "Mouse Back"
     if raw == "x2":
         return "Mouse Forward"
+    if raw == "middle":
+        return "Mouse Middle"
     # Strip angle brackets for display — <caps_lock> → caps_lock
     display = str(key_name).strip()
     if display.startswith("<") and display.endswith(">"):
@@ -1180,6 +1258,9 @@ def main() -> None:
             elif button == pynput_mouse.Button.x2:
                 _finish("x2", "Mouse Fwd (x2)")
                 return False
+            elif button == pynput_mouse.Button.middle:
+                _finish("middle", "Mouse Middle")
+                return False
 
         active["kb"] = keyboard.Listener(on_press=_on_press)
         _active_recorders.append(active["kb"])
@@ -1270,6 +1351,9 @@ def main() -> None:
                 return False
             elif button == _ms.Button.x2:
                 _bridge.post(lambda: _finish("x2", "Mouse Fwd (x2)"))
+                return False
+            elif button == _ms.Button.middle:
+                _bridge.post(lambda: _finish("middle", "Mouse Middle"))
                 return False
 
         class _JOYINFOEX(_ctypes.Structure):
@@ -2018,6 +2102,9 @@ def main() -> None:
             elif button == _ms.Button.x2:
                 _finish("x2", "Mouse Fwd (x2)")
                 return False
+            elif button == _ms.Button.middle:
+                _finish("middle", "Mouse Middle")
+                return False
 
         active["kb"] = _kb.Listener(on_press=_on_press, on_release=_on_release)
         _active_recorders.append(active["kb"])
@@ -2139,18 +2226,7 @@ def main() -> None:
             elif mode.get() == "toggle":
                 _runtime_mode["value"] = "toggle"
                 _key = ptt_key.get()
-                from pynput import keyboard as _kb_check  # type: ignore
-                _key_invalid = _is_mouse_button(_key) or _is_joy_button(_key) or not _resolve_hold_key(_key, _kb_check)
-                if _key_invalid:
-                    _fallback = "caps_lock"
-                    ptt_key.set(_fallback)
-                    _bridge.post(lambda _f=_fallback: _show_inline_notice(
-                        f"Toggle mode needs a keyboard key — switched PTT key to {_f}. "
-                        "Record a different key in Settings if needed.",
-                        tone="info", duration_ms=8000, closable=True,
-                    ))
-                    _key = _fallback
-                _toggle_label = f"Listening (toggle {_key})"
+                _toggle_label = f"Listening (toggle {_format_record_key_name(_key)})"
                 listener.start_toggle(
                     _key,
                     model_path=_model_dir(),

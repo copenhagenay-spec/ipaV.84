@@ -80,10 +80,10 @@
     "turn off the game overlay"
   ],
   "_ih_restart_vera": [
-    "restart vera",
+    "restart shira",
     "restart assistant",
     "restart the assistant",
-    "reboot vera",
+    "reboot shira",
     "reboot assistant",
     "reboot the assistant",
     "restart",
@@ -225,7 +225,7 @@
   "_ih_mute": [
     "mute",
     "be quiet",
-    "shut up vera",
+    "shut up shira",
     "silence",
     "go quiet",
     "stop talking"
@@ -235,12 +235,12 @@
     "you can talk",
     "start talking",
     "come back",
-    "wake up vera",
+    "wake up shira",
     "i can hear you now",
-    "okay vera",
-    "ok vera",
-    "vera come back",
-    "vera unmute"
+    "okay shira",
+    "ok shira",
+    "shira come back",
+    "shira unmute"
   ],
   "_ih_volume_max": [
     "set volume max",
