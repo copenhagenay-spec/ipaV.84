@@ -2746,7 +2746,13 @@ def main() -> None:
         target = os.path.join(base_dir, "python", "pythonw.exe")
         arguments = f'"{os.path.join(base_dir, "assistant.py")}"'
         icon = os.path.join(base_dir, "data", "assets", "ipa.ico")
-        desktop = os.path.join(os.environ.get("USERPROFILE", ""), "Desktop", "SHRA.lnk")
+        try:
+            import ctypes.wintypes
+            buf = ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
+            ctypes.windll.shell32.SHGetFolderPathW(None, 0x0000, None, 0, buf)
+            desktop = os.path.join(buf.value, "SHRA.lnk")
+        except Exception:
+            desktop = os.path.join(os.environ.get("USERPROFILE", ""), "Desktop", "SHRA.lnk")
         start_menu_dir = os.path.join(
             os.environ.get("APPDATA", ""),
             "Microsoft", "Windows", "Start Menu", "Programs", "SHRA"
@@ -2991,12 +2997,22 @@ def main() -> None:
             return
         try:
             from pynput import keyboard as _kb
-            key_obj = _resolve_hold_key(hk, _kb)
-            if not key_obj:
-                return
-            def _on_press(key):
-                if key == key_obj:
-                    _bridge.post(_game_overlay.toggle)
+            _raw_hk = hk.strip().lower().strip('<>')
+            _numpad_set = {"num0","num1","num2","num3","num4","num5","num6","num7",
+                           "num8","num9","numdecimal","nummultiply","numadd","numsubtract",
+                           "numdivide","numenter"}
+            if _raw_hk in _numpad_set:
+                _hk_vk = _key_name_to_vk(_raw_hk)
+                def _on_press(key):
+                    if hasattr(key, 'vk') and key.vk == _hk_vk:
+                        _bridge.post(_game_overlay.toggle)
+            else:
+                key_obj = _resolve_hold_key(hk, _kb)
+                if not key_obj:
+                    return
+                def _on_press(key):
+                    if key == key_obj:
+                        _bridge.post(_game_overlay.toggle)
             listener = _kb.Listener(on_press=_on_press)
             listener.daemon = True
             listener.start()
