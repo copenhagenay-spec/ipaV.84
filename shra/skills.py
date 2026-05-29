@@ -1351,6 +1351,24 @@ def _resolve_key(raw: str):
 
 _MODIFIER_NAMES = {"ctrl", "alt", "shift", "cmd"}
 
+def _get_vk(key_obj) -> int | None:
+    """Extract Windows VK code from a pynput key object."""
+    if hasattr(key_obj, 'vk') and key_obj.vk:
+        return key_obj.vk
+    if hasattr(key_obj, 'char') and key_obj.char:
+        import ctypes
+        _vks = ctypes.windll.user32
+        _vks.VkKeyScanW.argtypes = [ctypes.c_wchar]
+        _vks.VkKeyScanW.restype = ctypes.c_short
+        result = _vks.VkKeyScanW(key_obj.char)
+        vk = result & 0xFF
+        return vk if vk != 0xFF else None
+    if hasattr(key_obj, 'value'):
+        inner = key_obj.value
+        if hasattr(inner, 'vk') and inner.vk:
+            return inner.vk
+    return None
+
 
 def _press_key(key: str, count: int = 1) -> bool:
     """Press a single key or combo (e.g. 'alt+n', 'ctrl+shift+f', 'x1')."""
@@ -1379,20 +1397,40 @@ def _press_key(key: str, count: int = 1) -> bool:
             _log_event(f"PRESS_KEY_FAILED: unknown key: {main}")
             return False
 
-        kb_ctl = _kb.Controller()
         ms_ctl = _mouse.Controller()
 
         for i in range(max(1, count)):
-            for mod in modifiers:
-                kb_ctl.press(mod)
             if resolved[0] == "mouse":
+                kb_ctl = _kb.Controller()
+                for mod in modifiers:
+                    kb_ctl.press(mod)
                 ms_ctl.press(resolved[1])
                 ms_ctl.release(resolved[1])
+                for mod in reversed(modifiers):
+                    kb_ctl.release(mod)
             else:
-                kb_ctl.press(resolved[1])
-                kb_ctl.release(resolved[1])
-            for mod in reversed(modifiers):
-                kb_ctl.release(mod)
+                import win32api, win32con
+                vk = _get_vk(resolved[1])
+                if vk:
+                    mod_vks = [_get_vk(m) for m in modifiers]
+                    for mv in mod_vks:
+                        if mv:
+                            win32api.keybd_event(mv, 0, 0, 0)
+                    win32api.keybd_event(vk, 0, 0, 0)
+                    time.sleep(0.05)
+                    win32api.keybd_event(vk, 0, win32con.KEYEVENTF_KEYUP, 0)
+                    for mv in reversed(mod_vks):
+                        if mv:
+                            win32api.keybd_event(mv, 0, win32con.KEYEVENTF_KEYUP, 0)
+                else:
+                    kb_ctl = _kb.Controller()
+                    for mod in modifiers:
+                        kb_ctl.press(mod)
+                    kb_ctl.press(resolved[1])
+                    time.sleep(0.05)
+                    kb_ctl.release(resolved[1])
+                    for mod in reversed(modifiers):
+                        kb_ctl.release(mod)
             if count > 1 and i < count - 1:
                 time.sleep(0.1)
 
@@ -1406,6 +1444,7 @@ def _press_key(key: str, count: int = 1) -> bool:
 def _run_macro(sequence: str, count: int = 1) -> bool:
     """Run a macro sequence of key steps separated by '>'. e.g. 'x1 > q' or 'alt+n'."""
     steps = [s.strip() for s in sequence.split(">") if s.strip()]
+    time.sleep(0.25)
     for _ in range(max(1, count)):
         for step in steps:
             _press_key(step, 1)
